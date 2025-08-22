@@ -23,18 +23,11 @@ class ConfigItems(Enum):
     FILE_STATUS = 'file_status'
 
     # Add in 'type' order for nicer doc generation
-    CRASH_DUMPS = 'crash_dumps'
     TRACE_FILES_SRAM = 'trace_files_sram'
     TRACE_FILES = 'trace_files'
     UP_FILES = 'up_files'
-    LIFT_AGENT_FILES = 'liftAgent_files'
-    LIFT_AGENT_ACTIVE_APP = 'liftAgent_active_app'
-    LIFT_AGENT_LOG_FILES = 'liftAgent_log_files'
-    LIFT_AGENT_SCRIPT_FILES = 'liftAgent_script_files'
     BUILD_INFO = 'build_info'
     SYSTEM_LOG_FILES = 'system_log_files'
-    SOCKET_CONFIG_FILE = 'socket_config_file'
-    CLOUD_AGENT_FILES = 'cloudAgent_files'
     ARK_1000_LOG_FILES = 'ark_1000_log_files'
     LOGGED_PARAMS_FILES = 'logged_params_files'
     DOOR_OPEN_TOTAL_COUNT_FILES = 'door_open_total_count_files'
@@ -59,17 +52,6 @@ class FileStatusNames(Enum):
     WRITEABLE = "writeable"
     READABLE_AND_WRITEABLE = "readable_writeable"
 
-
-@unique
-class PartitionsItems(Enum):
-    PARTITIONS = 'partitions'
-    COMMENT = ConfigNames.COMMENT.value
-    PATH = ConfigNames.PATH.value
-
-
-@unique
-class PartitionsNames(Enum):
-    ARITCO = 'aritco'
 
 @unique
 class GatewayConfigItems(Enum):
@@ -108,8 +90,6 @@ class DiskHandler:
             config_path = os.path.join(source_path, "config", "liftAgent_config.json")
             with open(config_path) as data_file:
                 self.sfs_config = json.load(data_file)["shared_file_system"]
-            with open(config_path) as data_file:
-                self.partition_config = json.load(data_file)[PartitionsItems.PARTITIONS.value]
             with open(config_path) as data_file:
                 self.gateway_config = json.load(data_file)[GatewayConfigItems.GATEWAY_CONFIG.value]
 
@@ -220,20 +200,8 @@ class DiskHandler:
     def get_partition_config(self):
         return self.partition_config
 
-    def get_active_app_path(self):
-        return self.sfs_config[ConfigItems.LIFT_AGENT_ACTIVE_APP.value][ConfigNames.PATH.value]
-
     def get_upgrade_package_path(self):
         return self.sfs_config[ConfigItems.UP_FILES.value][ConfigNames.PATH.value]
-
-    def get_liftAgent_package_path(self):
-        return self.sfs_config[ConfigItems.LIFT_AGENT_FILES.value][ConfigNames.PATH.value]
-
-    def get_cloudAgent_upgrade_path(self):
-        return self.sfs_config[ConfigItems.CLOUD_AGENT_FILES.value][ConfigNames.PATH.value]
-
-    def get_liftAgent_log_path(self):
-        return self.sfs_config[ConfigItems.LIFT_AGENT_LOG_FILES.value][ConfigNames.PATH.value]
 
     def get_system_log_path(self):
         return self.sfs_config[ConfigItems.SYSTEM_LOG_FILES.value][ConfigNames.PATH.value]
@@ -262,31 +230,13 @@ class DiskHandler:
     def get_trace_log_path(self):
         return self.sfs_config[ConfigItems.TRACE_FILES.value][ConfigNames.PATH.value]
 
-    def get_scripts_path(self):
-        return self.sfs_config[ConfigItems.LIFT_AGENT_SCRIPT_FILES.value][ConfigNames.PATH.value]
-
-    def get_crash_dump_path(self):
-        return self.sfs_config[ConfigItems.CRASH_DUMPS.value][ConfigNames.PATH.value]
-
     def get_buildInfo_path(self):
         path = self.sfs_config[ConfigItems.BUILD_INFO.value][ConfigNames.PATH.value]
         filename = self.sfs_config[ConfigItems.BUILD_INFO.value][ConfigNames.FILENAME.value]
         return os.path.join(path, filename)
 
-    def get_socket_config_path(self):
-        return self.sfs_config[ConfigItems.SOCKET_CONFIG_FILE.value][ConfigNames.PATH.value]
-
-    def get_socket_config_filename(self):
-        return self.sfs_config[ConfigItems.SOCKET_CONFIG_FILE.value][ConfigNames.FILENAME.value]
-
-    def get_active_app_filename(self):
-        return self.sfs_config[ConfigItems.LIFT_AGENT_ACTIVE_APP.value][ConfigNames.FILENAME.value]
-
     def get_upgrade_package_filename(self):
         return self.sfs_config[ConfigItems.UP_FILES.value][ConfigNames.FILENAME.value]
-
-    def get_aritco_partition_path(self):
-        return self.partition_config[PartitionsNames.ARITCO.value][PartitionsItems.PATH.value]
 
     def get_wifi_user_credentials_path(self):
         return self.gateway_config[GatewayConfigNames.WIFI_USER_CREDENTIALS.value][GatewayConfigItems.PATH.value]
@@ -357,11 +307,6 @@ class DiskHandler:
             print("Write: " + self.sfs_config[item.value][ConfigNames.WRITE.value])
             print("Read: " + self.sfs_config[item.value][ConfigNames.READ.value])
             print("Type: " + self.sfs_config[item.value][ConfigNames.TYPE.value])
-            print()
-
-        for item in PartitionsNames:
-            print(self.partition_config[item.value][PartitionsItems.COMMENT.value])
-            print("Mount path: " + self.partition_config[item.value][PartitionsItems.PATH.value])
             print()
 
 
