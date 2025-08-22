@@ -350,7 +350,7 @@ class TestThousandLib(unittest.TestCase):
         assert signal.byte_size == byte_size
         assert signal.signal_type == signal_type
 
-    @patch('lib.thousandLib.Signal')
+    @patch('lib.thousand_lib.Signal')
     def test_init_database(self, signal_mock):
         signal_mock.side_effect = TypeError
         with self.assertRaises(TypeError):
