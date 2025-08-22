@@ -78,36 +78,36 @@ class TestDiskHandler(unittest.TestCase):
 
         # -------- Send invalid arguments ---------
         type, filename = self.dh._DiskHandler__validate_status_input_arguments(4)
-        assert type == -1
-        assert filename == -1
+        assert type == '-1'
+        assert filename == '-1'
 
         type, filename = self.dh._DiskHandler__validate_status_input_arguments('4')
-        assert type == -1
-        assert filename == -1
+        assert type == '-1'
+        assert filename == '-1'
 
         type, filename = self.dh._DiskHandler__validate_status_input_arguments()
-        assert type == -1
-        assert filename == -1
+        assert type == '-1'
+        assert filename == '-1'
 
         type, filename = self.dh._DiskHandler__validate_status_input_arguments({0x4})
-        assert type == -1
-        assert filename == -1
+        assert type == '-1'
+        assert filename == '-1'
 
         type, filename = self.dh._DiskHandler__validate_status_input_arguments([4, 5, 6])
-        assert type == -1
-        assert filename == -1
+        assert type == '-1'
+        assert filename == '-1'
 
         type, filename = self.dh._DiskHandler__validate_status_input_arguments([4, 5])
-        assert type == -1
-        assert filename == -1
+        assert type == '-1'
+        assert filename == '-1'
 
         type, filename = self.dh._DiskHandler__validate_status_input_arguments(['4', 5])
-        assert type == -1
-        assert filename == -1
+        assert type == '-1'
+        assert filename == '-1'
 
         type, filename = self.dh._DiskHandler__validate_status_input_arguments([4, '5'])
-        assert type == -1
-        assert filename == -1
+        assert type == '-1'
+        assert filename == '-1'
 
         # --------- Send valid arguments, a list with two strings
         type, filename = self.dh._DiskHandler__validate_status_input_arguments(['4', '5'])
