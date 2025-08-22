@@ -1,9 +1,10 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 
 import os
 import sys
 import time
 from enum import Enum
+import typing
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)))
 from lib.error_signals import Rs232Code
@@ -50,7 +51,7 @@ class ThousandLib:
         self.total_open_door_counters = [0] * 6
         self.reset_saved_open_door_counter = True
 
-    def get_param(self, param):
+    def get_param(self, param: int) -> tuple[int, typing.Any]:
         """
         Return a parameter if it exists in the database
         :param: param: parameter number for wanted param
@@ -68,7 +69,7 @@ class ThousandLib:
         # self.__reset_vfd_motor_param_after_read(param)
         return val, self.rs232Codes.NO_ERR.name
 
-    def get_file_for_param(self, param):
+    def get_file_for_param(self, param: int) -> str:
         """
         Return a file for where the specified param can be found
         Creates a list with all param numbers for each enum and then compares arg against list
@@ -92,7 +93,7 @@ class ThousandLib:
         else:
             return ""
 
-    def get_updated_params(self, package_id, response=[]):
+    def get_updated_params(self, package_id: str, response: list = []) -> tuple[list, str]:
         """
         Unpack a complete lift response
         :param: package_id: the package to unpack.
@@ -101,7 +102,7 @@ class ThousandLib:
         :return: err_code: Error code
         """
         err_code = self.rs232Codes.PACKAGE_NOT_SUPPORTED.name
-        changed_signals = []
+        changed_signals: list = []
         if package_id == 'liftRef1':
             signals_to_unpack = self.params_lift_ar
         elif package_id == 'liftRef2':
@@ -153,14 +154,14 @@ class ThousandLib:
 
         return changed_signals, err_code
 
-    def available_params(self):
+    def available_params(self): # TODO: TYPE??
         """
         Get list of all available parameters
         :return: lift containing all available params
         """
         return self.database.keys()
 
-    def __update_virtual_signals(self):
+    def __update_virtual_signals(self) -> tuple[list, str]:
         """
         Handle all signals that require some special step of unpacking
         :param: signal_nr: Signal to be updated
@@ -196,7 +197,7 @@ class ThousandLib:
 
         return changed_signals, err_code
 
-    def door_open_count_recalculate(self, response):
+    def door_open_count_recalculate(self, response: list) -> tuple[list, str]:
         """
         unpack response from lift
         calculate if lift has restarted
@@ -225,21 +226,21 @@ class ThousandLib:
         return changed_signals, err_code
 
 
-    def reset_door_closing_time_params(self):
+    def reset_door_closing_time_params(self) -> None:
         """
         To reset door closing params after params has been read and sent to cloud
          """
         for signal in self.params_door_closing_time:
             self.database[signal.value].value = '0'
 
-    def reset_135_params(self):
+    def reset_135_params(self) -> None:
         """
         To reset params used to unpack 135 pkg
         """
         for signal in self.params_135:
             self.database[signal.value].value = '0'
 
-    def update_door_closing_time(self, response):
+    def update_door_closing_time(self, response: list) -> tuple[list, str]:
         """
         Unpack and update door closing time parameters
         : param: response : input 135 packag
@@ -286,7 +287,7 @@ class ThousandLib:
 
         return changed_signals, err_code
 
-    def update_vfd_params(self, resp):
+    def update_vfd_params(self, resp: dict) -> tuple[list, str]:
         """
         Take the vfdResult data and extract motor data into the different motor data parameters
         Para 169 - VFD Motor Current
@@ -330,7 +331,7 @@ class ThousandLib:
 
         return changed_signal, err_code
 
-    def __update_floor_lock(self):
+    def __update_floor_lock(self) -> tuple[str, str]:
         """
         Convert the six floor lock params to one floor lock param with the same logic as AHL.
         Bitwise indication for which floor is locked, 1 = locked, 0 = unlocked.
@@ -350,15 +351,15 @@ class ThousandLib:
         bin_val = f"{floor_6_lock}{floor_5_lock}{floor_4_lock}{floor_3_lock}{floor_2_lock}{floor_1_lock}"
         try:
             int_val = int(bin_val, 2)
-            int_val = str(int_val)
+            str_val = str(int_val)
         except ValueError as e:
             self.print(e)
             self.print(f"Error: Failed to convert: {bin_val} to integer")
             return '-1', self.rs232Codes.PARTIAL_ERR.name
 
-        return int_val, self.rs232Codes.NO_ERR.name
+        return str_val, self.rs232Codes.NO_ERR.name
 
-    def __update_temp(self, signal_nr):
+    def __update_temp(self, signal_nr: str) -> tuple[str, str]:
         """
         Unpacks the virtual Temp signal.
         Update the temp signal to correct value
@@ -371,16 +372,16 @@ class ThousandLib:
             self.print(f"Error: No latest response to use for unpacking signal {self.database[signal_nr]}.")
             return '-1', self.rs232Codes.PARTIAL_ERR.name
         try:
-            val = int(int(latest_raw)/100)
-            val = str(val)
+            int_val = int(int(latest_raw)/100)
+            str_val = str(int_val)
         except Exception as e:
             self.print(e)
             self.print("Error: Temp_134.value is missing in database")
             return "-1", self.rs232Codes.PARTIAL_ERR.name
 
-        return val, self.rs232Codes.NO_ERR.name
+        return str_val, self.rs232Codes.NO_ERR.name
 
-    def __update_impulse(self):
+    def __update_impulse(self) -> tuple[str, str]:
         """
         Parse progname and set if Hold to run or Automatic run.
         The value is always stored as the last character.
@@ -405,7 +406,7 @@ class ThousandLib:
         else:
             return '-1', self.rs232Codes.DATA_ERR.name
 
-    def __update_battery_state(self, signal_nr):
+    def __update_battery_state(self, signal_nr: str) -> tuple[str, str]:
         """
         Remap battery state from Digisign enum to Aritco enum.
         :return: <val>, <err_code>
@@ -433,7 +434,7 @@ class ThousandLib:
         else:
             return '-1', self.rs232Codes.PARTIAL_ERR.name
 
-    def __unpack_signal(self, signal, response):
+    def __unpack_signal(self, signal: typing.Any, response: list) -> tuple[str, typing.Any]:
         """
         Unpack signals depending on signal_type
         :param: signal: the signal to unpack.
@@ -441,31 +442,45 @@ class ThousandLib:
         :return: unpacked signal
         :return: err_code: Error code
         """
-        val = "-1"
+        unpacked_val = -1
+        unpacked_as_str = str(unpacked_val)
+
         if 'generic_text' not in signal.signal_type:
             try:
                 self.__validate_bytes(signal, response)
             except Exception as e:
                 self.print(e)
-                return val, self.rs232Codes.PARTIAL_ERR.name
+                return unpacked_as_str, self.rs232Codes.PARTIAL_ERR.name
+
         if signal.signal_type == 'uint':
-            val = self.__unpack_uint(signal, response)
+            unpacked_val = self.__unpack_uint(signal, response)
+            unpacked_as_str = str(unpacked_val)
+
         elif signal.signal_type == 'wtime':
-            val = self.__unpack_weekly_timer(signal, response)
+            unpacked_val = self.__unpack_weekly_timer(signal, response)
+            unpacked_as_str = str(unpacked_val)
+
         elif signal.signal_type == 'byte':
-            val = self.__unpack_byte(signal, response)
+            unpacked_val = self.__unpack_byte(signal, response)
+            unpacked_as_str = str(unpacked_val)
+
         elif signal.signal_type == 'string':
-            val = self.__unpack_string(signal, response)
+            unpacked_as_str = self.__unpack_string(signal, response)
+
         elif signal.signal_type == 'time':
-            val = self.__unpack_as_epoch_time(signal, response)
+            unpacked_val = self.__unpack_as_epoch_time(signal, response)
+            unpacked_as_str = str(unpacked_val)
+
         elif 'generic_text' in signal.signal_type:
-            val = self.__unpack_generic_text(signal, response)
+            unpacked_as_str = self.__unpack_generic_text(signal, response)
+
         else:
             self.print(f"Signal type not supported: {signal.signal_type}.")
-            return str(val), self.rs232Codes.PARTIAL_ERR.name
-        return str(val), self.rs232Codes.NO_ERR.name
+            return unpacked_as_str, self.rs232Codes.PARTIAL_ERR.name
 
-    def __validate_bytes(self, signal, response):
+        return unpacked_as_str, self.rs232Codes.NO_ERR.name
+
+    def __validate_bytes(self, signal: typing.Any, response: list) -> None:
         """
         Validate response from serial buffer.
         Validates that the required number of bytes exists in response.
@@ -474,9 +489,8 @@ class ThousandLib:
         :param: response: complete package response from ARK.
         :return: true if ok, otherwise error
         """
-        last_byte = signal.byte_start+signal.byte_size
         try:
-            for i in range(signal.byte_start, signal.byte_start+signal.byte_size):
+            for i in range(int(signal.byte_start), int(signal.byte_start+signal.byte_size)):
                 byte = response[i]
                 byte_as_int = int(byte)
                 if not 0 <= byte_as_int <= 255:
@@ -489,7 +503,7 @@ class ThousandLib:
             raise ValueError("Bad data received on serial bus?")
 
     @staticmethod
-    def __unpack_uint(signal, response):
+    def __unpack_uint(signal: typing.Any, response: list) -> int:
         """
         Unpack uint32 packed as little endian.
 
@@ -503,7 +517,7 @@ class ThousandLib:
             data_out = data_out | response[signal.byte_start+i]
         return data_out
 
-    def __unpack_weekly_timer(self, signal, response):
+    def __unpack_weekly_timer(self, signal: typing.Any, response: list) -> int:
         """
         Unpack signals that are set as max seconds in a week (60*60*24*7) and ticks down.
         A value of (max_time - unpacked_time) = 20 means that the alarm occurred 20 seconds ago
@@ -515,11 +529,11 @@ class ThousandLib:
         unpacked_time = self.__unpack_uint(signal, response)
         max_time = 60*60*24*7
         if not unpacked_time == 0:
-            unpacked_time = time.time() - (max_time - unpacked_time)
+            unpacked_time = int(time.time()) - (max_time - unpacked_time)
         return unpacked_time
 
     @staticmethod
-    def __unpack_byte(signal, response):
+    def __unpack_byte(signal: typing.Any, response: list) -> int:
         """
         Unpack signals of size 8 bits or fewer.
 
@@ -532,7 +546,7 @@ class ThousandLib:
         data_out = data_out & (pow(2, signal.bit_size)-1)
         return data_out
 
-    def __unpack_string(self, signal, response):
+    def __unpack_string(self, signal: typing.Any, response: list) -> str:
         """
         Unpack a list of bytes packed as ascii and returns a string of chars.
         Breaks at NULL and ignores other unsupported characters.
@@ -552,7 +566,7 @@ class ThousandLib:
                 data_out += unpacked_char
         return data_out
 
-    def __unpack_generic_text(self, signal, response):
+    def __unpack_generic_text(self, signal: typing.Any, response: list) -> str:
         """
         Unpack a number that can be byte_size long and return as a string.
         Breaks at NULL
@@ -574,7 +588,7 @@ class ThousandLib:
             generic_text = generic_text.replace('_', ' ')
         return generic_text
 
-    def __unpack_as_epoch_time(self, signal, response):
+    def __unpack_as_epoch_time(self, signal: typing.Any, response: list) -> int:
         """
         Unpack a signal containing seconds since 2001-01-01 and return epoch time (not accounting for leap seconds).
 
@@ -591,21 +605,18 @@ class ThousandLib:
         data_out = s_1970_to_2001+s_since_2001
         return data_out
 
-
-    def __unpack_vfdResult_data(self, signal, response):
+    def __unpack_vfdResult_data(self, signal: typing.Any, data: str) -> int:
         """
         Unpack a signal containing response data from vfd
         Result from vfdResult is sent as big endian
         """
-
-        data_list = response.split(",")
+        data_list = data.split(",")
         data_out = 0
         for i in range(signal.byte_start-1, signal.byte_start+signal.byte_size-1):
             data_out = data_out << 8
             data_out = data_out | int(data_list[i], 16)
 
         return data_out
-
 
     def __init_database(self):
         """
@@ -875,10 +886,10 @@ class Signal:
             self.print(e)
             raise e
 
-        if self.signal_type == "byte" and self.bit_start+self.bit_size > 8:
+        if self.signal_type == "byte" and int(self.bit_start) + int(self.bit_size) > 8:
             raise ValueError(f"Bit start {self.bit_start} + bit size {self.bit_size} is greater than 8.")
 
-    def __assert_and_return(self, value, val_type):
+    def __assert_and_return(self, value: str | int, val_type) -> str | int:
         """
         Check type of value and return value if correct. Otherwise raise exception.
 
