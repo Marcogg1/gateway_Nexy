@@ -10,7 +10,7 @@ from mock import MagicMock
 
 p = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, 'src'))
 sys.path.append(p)
-import filemgmt.diskHandler as DH
+import filemgmt.disk_handler as DH
 
 
 class TestDiskHandler(unittest.TestCase):
@@ -45,21 +45,6 @@ class TestDiskHandler(unittest.TestCase):
         assert self.dh.file_status[DH.FileStatusNames.WRITEABLE.value] == '2'
         assert self.dh.file_status[DH.FileStatusNames.READABLE_AND_WRITEABLE.value] == '3'
         assert self.dh.file_status[DH.FileStatusNames.ERROR.value] == '-1'
-
-    def test_partitionConfigParameters(self):
-        """
-        Test parsed partition information from JSON config file and related helper functions.
-        :return:
-        """
-        assert len(DH.PartitionsItems) == 3
-        assert DH.PartitionsItems.PARTITIONS.value == 'partitions'
-        assert DH.PartitionsItems.COMMENT.value == 'comment__'
-        assert DH.PartitionsItems.PATH.value == 'path'
-
-        assert len(DH.PartitionsNames) == 1
-        assert DH.PartitionsNames.ARITCO.value == 'aritco'
-
-        assert self.dh.get_aritco_partition_path() == '/mnt/aritco/'
 
     def test_gatewayConfigParameters(self):
         """
@@ -139,15 +124,8 @@ class TestDiskHandler(unittest.TestCase):
         trace_sram = False
         trace = False
         up = False
-        crash = False
-        lift_agent = False
-        lift_agent_active_app = False
-        liftAgent_log_files = False
         system_log_files = False
-        liftAgent_script_files = False
         buildnumber = False
-        socket_config_file = False
-        cloud_agent = False
         ark_1000_log_file = False
         logged_params_file = False
         open_door_total_counter_file = False
@@ -181,14 +159,6 @@ class TestDiskHandler(unittest.TestCase):
                 trace = True
                 valid_types_found += 1
 
-            elif type == '0x01':
-                assert not crash
-                path = self.dh._DiskHandler__get_path_of_type(type)
-                print("Found path for {}: {}".format(type, path))
-                assert path == '/opt/smartlift/crash_dump/'
-                crash = True
-                valid_types_found += 1
-
             elif type == '0x07':
                 assert not up
                 path = self.dh._DiskHandler__get_path_of_type(type)
@@ -196,38 +166,6 @@ class TestDiskHandler(unittest.TestCase):
                 assert path == '/opt/smartlift/up/'
                 assert path == self.dh.get_upgrade_package_path()
                 up = True
-                valid_types_found += 1
-
-            elif type == '0x08':
-                assert not lift_agent
-                path = self.dh._DiskHandler__get_path_of_type(type)
-                print("Found path for {}: {}".format(type, path))
-                assert path == '/opt/smartlift/liftAgent/'
-                lift_agent = True
-                valid_types_found += 1
-
-            elif type == '0x09':
-                assert not lift_agent_active_app
-                path = self.dh._DiskHandler__get_path_of_type(type)
-                print("Found path for {}: {}".format(type, path))
-                assert path == '/opt/smartlift/liftAgent_active/'
-                lift_agent_active_app = True
-                valid_types_found += 1
-
-            elif type == '0x0A':
-                assert not liftAgent_log_files
-                path = self.dh._DiskHandler__get_path_of_type(type)
-                print("Found path for {}: {}".format(type, path))
-                assert path == '/opt/smartlift/log/liftAgent/'
-                liftAgent_log_files = True
-                valid_types_found += 1
-
-            elif type == '0x0B':
-                assert not liftAgent_script_files
-                path = self.dh._DiskHandler__get_path_of_type(type)
-                print("Found path for {}: {}".format(type, path))
-                assert path == '/opt/smartlift/script/'
-                liftAgent_script_files = True
                 valid_types_found += 1
 
             elif type == '0x0C':
@@ -244,22 +182,6 @@ class TestDiskHandler(unittest.TestCase):
                 print("Found path for {}: {}".format(type, path))
                 assert path == '/opt/smartlift/log/system/'
                 system_log_files = True
-                valid_types_found += 1
-
-            elif type == '0x0E':
-                assert not socket_config_file
-                path = self.dh._DiskHandler__get_path_of_type(type)
-                print("Found path for {}: {}".format(type, path))
-                assert path == '/opt/smartlift/'
-                socket_config_file = True
-                valid_types_found += 1
-
-            elif type == '0x0F':
-                assert not cloud_agent
-                path = self.dh._DiskHandler__get_path_of_type(type)
-                print("Found path for {}: {}".format(type, path))
-                assert path == '/opt/smartlift/cloudAgent/'
-                cloud_agent = True
                 valid_types_found += 1
 
             elif type == '0x10':
@@ -303,19 +225,12 @@ class TestDiskHandler(unittest.TestCase):
         assert trace_sram
         assert trace
         assert up
-        assert crash
-        assert lift_agent
-        assert lift_agent_active_app
-        assert liftAgent_log_files
-        assert liftAgent_script_files
         assert buildnumber
         assert system_log_files
-        assert socket_config_file
-        assert cloud_agent
         assert ark_1000_log_file
         assert other
         assert other == nr_types_to_check - valid_types_found
-        assert len(DH.ConfigItems) == 17
+        assert len(DH.ConfigItems) == 10
         assert len(DH.ConfigItems) == valid_types_found + 1  # file status has no type
 
     def test_config_names(self):
@@ -426,47 +341,10 @@ class TestDiskHandler(unittest.TestCase):
         """
         Test that filename retrieval functions return a string
         """
-
-        la_active_app = self.dh.get_active_app_filename()
-        assert la_active_app  # non empty
-        assert isinstance(la_active_app, str)
-
         up_package = self.dh.get_upgrade_package_filename()
         assert up_package
         assert isinstance(up_package, str)
 
-        socket_cfg = self.dh.get_socket_config_filename()
-        assert socket_cfg
-        assert isinstance(socket_cfg, str)
-
-    def test_file_permission_change_fail(self):
-        """
-        Test error cases when trying to set file permissions.
-        """
-        filename = 'this7cannot4possibly1exists'
-        err = self.dh.add_file_permissions(filename)
-        assert err == self.dhCodes.FILE_FLAG_ERR
-
-    def test_file_permission_change(self):
-        """
-        Tests function of setting permission attributes for file
-        """
-        read_write_execute_file_flags = "-rwxrwxrwx"
-
-        # Check and store original permissions
-        filename = os.path.abspath(__file__)
-        original_mode = os.stat(filename).st_mode
-        assert stat.filemode(original_mode) != read_write_execute_file_flags
-
-        # Check that correct permissions are set
-        err = self.dh.add_file_permissions(filename)
-        assert err == self.dhCodes.NO_ERR
-        modified_mode = os.stat(filename).st_mode
-        assert stat.filemode(modified_mode) == read_write_execute_file_flags
-
-        # Restore file permissions
-        os.chmod(filename, original_mode)
-        assert os.stat(filename).st_mode == original_mode
 
     @mock.patch('shutil.disk_usage')
     def test_disk_info_arg(self, mock_disk_usage):

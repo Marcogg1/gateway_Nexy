@@ -1,3 +1,5 @@
 pytest
 pytest-subtests
 pytest-cov
+pymy
+mock

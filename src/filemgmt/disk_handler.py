@@ -7,6 +7,7 @@ import stat
 from enum import Enum, unique
 
 source_path = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
+root_path = os.path.abspath(os.path.join(source_path, os.path.pardir))
 sys.path.append(source_path)
 from lib.error_signals import DhCode
 
@@ -87,7 +88,7 @@ class DiskHandler:
         self.free_disk_space_limit = limit*self.get_disk_info(DiskArea.TOTAL.value)
 
         try:
-            config_path = os.path.join(source_path, "config", "liftAgent_config.json")
+            config_path = os.path.join(root_path, "config.json")
             with open(config_path) as data_file:
                 self.sfs_config = json.load(data_file)["shared_file_system"]
             with open(config_path) as data_file:
@@ -150,24 +151,6 @@ class DiskHandler:
             return status, self.name, self.DhCode.DISK_LIMIT_ERR.name
 
         return status, self.name, self.DhCode.NO_ERR.name
-
-    def add_file_permissions(self, file_path):
-        """
-        Function sets read, write and execution flags for file.
-        :param file_path: full path to file
-        :return: DiskHandler (no) error code
-        """
-        try:
-            # Set the permissions: [owner (0o0700) | group (0o0070) | others (0o0007)]
-            os.chmod(file_path, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
-            return self.DhCode.NO_ERR
-        except FileNotFoundError as e:
-            self.print("Error: file permission change failed,  '{}' missing".format(file_path))
-            self.print(e)
-        except Exception as e:
-            self.print("Error: file permission change failed for '{}'".format(file_path))
-            self.print(e)
-        return self.DhCode.FILE_FLAG_ERR
 
     def get_disk_info(self, spec):
         """
