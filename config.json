@@ -1,0 +1,186 @@
+{
+  "shared_file_system": {
+    "comment__": "parameters regarding the shared file system",
+    "file_status": {
+      "comment__": "File statuses",
+      "error": "-1",
+      "not_found": "0",
+      "readable": "1",
+      "writeable": "2",
+      "readable_writeable": "3"
+    },
+    "trace_files_sram": {
+      "comment__": "Lift trace files from sram",
+      "path": "/opt/smartlift/trace/",
+      "filename": "LCM_AR<id number>_<buf_idx>_<timestamp>.sw_traces",
+      "write": "liftAgent",
+      "read": "cloudAgent",
+      "type": "0x02"
+    },
+    "trace_files": {
+      "comment__": "Lift trace files",
+      "path": "/opt/smartlift/trace/",
+      "filename": "LCM_AR<id number>_<timestamp>.sw_traces",
+      "write": "liftAgent",
+      "read": "cloudAgent",
+      "type": "0x06"
+    },
+    "crash_dumps": {
+      "comment__": "Lift crash dump files (not implemented)",
+      "path": "/opt/smartlift/crash_dump/",
+      "filename": "<filename>",
+      "write": "liftAgent",
+      "read": "cloudAgent",
+      "type": "0x01"
+    },
+    "up_files": {
+      "comment__": "Upgrade Package (UP) files",
+      "path": "/opt/smartlift/up/",
+      "filename": "up_<UP number>_<release version>.up",
+      "write": "cloudAgent",
+      "read": "liftAgent",
+      "type": "0x07"
+    },
+    "liftAgent_files": {
+      "comment__": "LiftAgent app (used for update)",
+      "path": "/opt/smartlift/liftAgent/",
+      "filename": "liftAgent_armv7l_v<version, format 'X.Y.Z'>",
+      "write": "cloudAgent",
+      "read": "liftAgent",
+      "type": "0x08"
+    },
+    "liftAgent_active_app": {
+      "comment__": "Active LiftAgent app (symlink to running app)",
+      "path": "/opt/smartlift/liftAgent_active/",
+      "filename": "liftAgent",
+      "write": "liftAgent",
+      "read": "liftAgent",
+      "type": "0x09"
+    },
+    "liftAgent_log_files": {
+      "comment__": "LiftAgent log files",
+      "path": "/opt/smartlift/log/liftAgent/",
+      "filename": "<device id>_liftAgent_log_<timestamp>",
+      "write": "liftAgent",
+      "read": "cloudAgent",
+      "type": "0x0A"
+    },
+    "liftAgent_script_files": {
+      "comment__": "Script files",
+      "path": "/opt/smartlift/script/",
+      "filename": "<filename>",
+      "write": "cloudAgent",
+      "read": "liftAgent",
+      "type": "0x0B"
+    },
+    "build_info": {
+      "comment__": "OS build info file",
+      "path": "/opt/smartlift/buildInfo/",
+      "filename": "buildInfo",
+      "write": "-",
+      "read": "liftAgent",
+      "type": "0x0C"
+    },
+    "system_log_files": {
+      "comment__": "System log file",
+      "path": "/opt/smartlift/log/system/",
+      "filename": "<device id>_system_log_<timestamp>",
+      "write": "liftAgent",
+      "read": "cloudAgent",
+      "type": "0x0D"
+    },
+    "socket_config_file": {
+      "comment__": "Socket server config file",
+      "path": "/opt/smartlift/",
+      "filename": "socket.config",
+      "write": "liftAgent",
+      "read": "cloudAgent",
+      "type": "0x0E"
+    },
+    "cloudAgent_files": {
+      "comment__": "CloudAgent app (used for update)",
+      "path": "/opt/smartlift/cloudAgent/",
+      "filename": "cloudAgent.next",
+      "write": "liftAgent",
+      "read": "cloudAgent",
+      "type": "0x0F"
+    },
+    "ark_1000_log_files": {
+      "comment__": "ARK1000 logfile",
+      "path": "/opt/smartlift/log/ARK_1000/",
+      "filename": "ARK_1000_AR<id_number>_<timestamp>.eventlog",
+      "write": "liftAgent",
+      "read": "cloudAgent",
+      "type": "0x10"
+    },
+    "logged_params_files": {
+      "comment__": "Logged params",
+      "path": "/opt/smartlift/loggedParams/",
+      "filename": "logged_params.txt",
+      "write": "cloudAgent",
+      "read": "cloudAgent",
+      "type": "0x11"
+    },
+    "door_open_total_count_files": {
+      "comment__": "The number of times the door has been opened",
+      "path": "/opt/smartlift/doorParams/",
+      "filename": "door_open_total_count.txt",
+      "write": "liftAgent",
+      "read": "liftAgent",
+      "type": "0x12"
+    },
+    "door_open_previous_counter_files": {
+      "comment__": "The number of times the door has been opened",
+      "path": "/opt/smartlift/doorParams/",
+      "filename": "door_open_previous_count.txt",
+      "write": "liftAgent",
+      "read": "liftAgent",
+      "type": "0x13"
+    }
+  },
+
+  "partitions": {
+    "aritco": {
+      "comment__": "Aritco mount partition",
+      "path": "/mnt/aritco/"
+    }
+  },
+
+  "gateway_config": {
+    "aritco_config" : {
+      "comment__" : "Config with details for CA cloud connection",
+      "path" : "/etc/aritco/",
+      "filename" : "aritco.conf"
+    },
+    "certificate" : {
+      "comment__" : "Certificate file for connecting to Azure",
+      "path" : "/etc/aritco/",
+      "filename" : "cert.pem"
+    },
+    "certificate_key" : {
+      "comment__" : "Key for the Azure connection certificate",
+      "path" : "/etc/aritco/",
+      "filename" : "key.pem"
+    },
+    "wifi_user_credentials" : {
+      "comment__" : "Wifi credentials entered by user",
+      "path" : "/etc/aritco/wlan/",
+      "filename" : "wifi_login"
+    },
+    "wifi_ap_credentials" : {
+      "comment__" : "Wifi AP credentials",
+      "path" : "/etc/aritco/wlan/",
+      "filename" : "wifi_ap_login"
+    },
+    "ca_connection_status" : {
+      "comment__" : "CA writes to file showing current connection status",
+      "path" : "/etc/aritco/",
+      "filename" : "ca_connection_status.txt"
+    },
+    "ca_default_interface" : {
+      "comment__" : "Current interface used by CA",
+      "path" : "/etc/aritco/",
+      "filename" : "default_interface"
+    }
+  }
+}
