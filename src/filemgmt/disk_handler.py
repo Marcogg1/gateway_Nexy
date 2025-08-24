@@ -3,7 +3,6 @@ import os
 import sys
 import json
 import shutil
-import stat
 from enum import Enum, unique
 
 source_path = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
@@ -74,8 +73,7 @@ class GatewayConfigNames(Enum):
 
 
 class DiskHandler:
-
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Class constructor
         """
@@ -122,6 +120,7 @@ class DiskHandler:
         # Set full path to file
         file_path = os.path.join(path, filename)
 
+        status: str
         # Determine file status
         if not os.path.isfile(file_path):
             # file not found
@@ -159,8 +158,8 @@ class DiskHandler:
         :param spec: Specifies disk area
         :return: An int in megabytes
         """
-        disk_stat = 0
-        disk_info = shutil.disk_usage('/')
+        disk_stat: int = 0
+        disk_info: shutil._ntuple_diskusage = shutil.disk_usage('/')
         if spec == DiskArea.TOTAL.value:
             disk_stat = disk_info.total
         elif spec == DiskArea.USED.value:
@@ -172,7 +171,7 @@ class DiskHandler:
         return int(disk_stat) >> 20
 
     def check_enough_free_space(self) -> bool:
-        free_space = self.get_disk_info(DiskArea.FREE.value)
+        free_space: int = self.get_disk_info(DiskArea.FREE.value)
         if free_space < self.free_disk_space_limit:
             return False
         return True
@@ -211,8 +210,8 @@ class DiskHandler:
         return self.sfs_config[ConfigItems.TRACE_FILES.value][ConfigNames.PATH.value]
 
     def get_buildInfo_path(self) -> str:
-        path = self.sfs_config[ConfigItems.BUILD_INFO.value][ConfigNames.PATH.value]
-        filename = self.sfs_config[ConfigItems.BUILD_INFO.value][ConfigNames.FILENAME.value]
+        path: str = self.sfs_config[ConfigItems.BUILD_INFO.value][ConfigNames.PATH.value]
+        filename: str = self.sfs_config[ConfigItems.BUILD_INFO.value][ConfigNames.FILENAME.value]
         return os.path.join(path, filename)
 
     def get_upgrade_package_filename(self) -> str:
@@ -235,8 +234,8 @@ class DiskHandler:
             self.print("Error: expected input argument list with length 2 - got [{}]".format(args))
             return '-1', '-1'
 
-        type = args[0]
-        filename = args[1]
+        type: str = args[0]
+        filename: str = args[1]
 
         if not isinstance(type, str) or not isinstance(filename, str):
             self.print("Error: inputs must be string")
