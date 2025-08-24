@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 p = os.path.abspath(os.path.join(os.path.abspath(os.path.dirname(__file__)), os.path.pardir, 'src'))
 sys.path.append(p)
 from lib import syncTimeHandler
-from lib.liftAgent_error_signals import SyncTimeCode, MbCode
+from lib.error_signals import SyncTimeCode, MbCode
 
 
 class TestSyncTimeHandler(unittest.TestCase):

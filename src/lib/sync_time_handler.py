@@ -8,8 +8,7 @@ from math import ceil
 path_to_source = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 sys.path.append(path_to_source)
 
-from wrappers import printWrapper
-from lib.liftAgent_error_signals import SyncTimeCode, MbCode
+from lib.error_signals import SyncTimeCode, MbCode
 
 
 class SyncTimeHandler:
@@ -19,9 +18,9 @@ class SyncTimeHandler:
     def __init__(self):
         self.SyncTimeCode = SyncTimeCode
         self.name = self.SyncTimeCode.SOURCE.value
-        self.print = printWrapper.Print(self.name).print
+        self.print = print
 
-    def sync_time_rs232(self, time_value):
+    def sync_time_rs232(self, time_value: str) -> int:
         try:
             time_value = int(time_value)
         except ValueError as error:
@@ -87,10 +86,10 @@ class SyncTimeHandler:
 
         return self.__handle_return(self.SyncTimeCode.NO_ERR)
 
-    def __handle_return(self, error_code):
+    def __handle_return(self, error_code: str):
         return self.name, error_code.name
 
-    def __get_utc_time(self):
+    def __get_utc_time(self) -> int:
         utc = datetime.utcnow()
         utc_timestamp = ceil(utc.timestamp())
         self.print("UTC timestamp: {}".format(utc_timestamp))
