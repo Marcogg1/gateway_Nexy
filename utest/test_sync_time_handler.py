@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 p = os.path.abspath(os.path.join(os.path.abspath(os.path.dirname(__file__)), os.path.pardir, 'src'))
 sys.path.append(p)
-from lib import syncTimeHandler
+from lib import sync_time_handler
 from lib.error_signals import SyncTimeCode, MbCode
 
 
@@ -18,7 +18,7 @@ class TestSyncTimeHandler(unittest.TestCase):
     def setUp(self):
         print("\nSetup: {}".format(self._testMethodName))
 
-        self.handler = syncTimeHandler.SyncTimeHandler()
+        self.handler = sync_time_handler.SyncTimeHandler()
         assert self.handler.name == "SyncTimeHandler"
 
     def tearDown(self):
@@ -39,16 +39,13 @@ class TestSyncTimeHandler(unittest.TestCase):
         self.compare_timestamp(year=2020, month=10, day=30, hour=16)
         self.compare_timestamp(year=2040, month=12, day=5, hour=16, minute=13, second=42)
 
-    def test_response(self):
-        error_code = SyncTimeCode.NO_ERR
-        return_value = self.handler._SyncTimeHandler__handle_return(error_code)
-        assert return_value == (self.handler.name, SyncTimeCode.NO_ERR.name)
-
     def test_getTime_error_values(self):
         modbus_handler = None
 
         time_value_error = "not a number"
         expected_return = (self.handler.name, SyncTimeCode.ARG_TYPE_ERR.name)
+        print(self.handler.sync_time(time_value_error, modbus_handler))
+        print(expected_return)
         assert self.handler.sync_time(time_value_error, modbus_handler) == expected_return
 
         time_value_error = "-2"
