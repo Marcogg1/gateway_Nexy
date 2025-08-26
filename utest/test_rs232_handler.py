@@ -8,7 +8,7 @@ import serial
 p = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, 'src'))
 sys.path.append(p)
 
-import rs232.rs232Handler as RS
+import liftApi.rs232_handler as RS
 
 
 # MOCKS
@@ -839,8 +839,6 @@ class TestRs232Handler:
             assert err_code == self.rsCodes.NO_ERR.name
 
     def test_read_serial(self, monkeypatch):
-        self.rs.digisign_simulator = False
-
         # Test reading one 130 status message
         # -----------------------------------
         exp_serial = b'{"cmd": "operation", "type": 130, "data": [4, 5, 6, 7]}'
@@ -900,8 +898,6 @@ class TestRs232Handler:
         """
 
         # Set simulator to false in case rs_dev file somehow exists
-        self.rs.digisign_simulator = False
-
         exp_code = self.rsCodes.NO_WAITING_BYTES_ERR.name
         exp_rsp_full = -1
 
@@ -919,8 +915,6 @@ class TestRs232Handler:
         global m_serial_response
 
         # Set simulator to false in case rs_dev file somehow exists
-        self.rs.digisign_simulator = False
-
         exp_code = self.rsCodes.NO_ERR.name
 
         exp_rsp = b'{"cmd": "liftRef1", "data": "AR123456"}'
@@ -958,8 +952,6 @@ class TestRs232Handler:
         Test to read serial-port when there is indata but read somehow fails.
         """
         # Set simulator to false in case rs_dev file somehow exists
-        self.rs.digisign_simulator = False
-
         exp_code = self.rsCodes.SERIAL_COM_ERR.name
         exp_rsp = -1
 

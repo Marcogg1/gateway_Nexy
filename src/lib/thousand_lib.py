@@ -48,7 +48,7 @@ class ThousandLib:
         self.total_open_door_counters: list = [0] * 6
         self.reset_saved_open_door_counter: bool = True
 
-    def get_param(self, param: int) -> tuple[int, Any]:
+    def get_param(self, param: int) -> tuple[Any, str]:
         """
         Return a parameter if it exists in the database
         :param: param: parameter number for wanted param
@@ -152,7 +152,8 @@ class ThousandLib:
 
         return changed_signals, err_code
 
-    def available_params(self) -> dict_keys[Any, Any]:
+    #TODO:, rs232handler unittest complains on the "dict_keys[Any, Any] format for some reason, figure out why"
+    def available_params(self) -> Any:#dict_keys[Any, Any]: 
         """
         Get list of all available parameters
         :return: lift containing all available params
@@ -195,7 +196,7 @@ class ThousandLib:
 
         return changed_signals, err_code
 
-    def door_open_count_recalculate(self, response: list) -> tuple[list, str]:
+    def door_open_count_recalculate(self, response: Any) -> tuple[list, str]:
         """
         unpack response from lift
         calculate if lift has restarted
@@ -238,7 +239,7 @@ class ThousandLib:
         for signal in self.params_135:
             self.database[signal.value].value = '0'
 
-    def update_door_closing_time(self, response: list) -> tuple[list, str]:
+    def update_door_closing_time(self, response: str) -> tuple[list, str]:
         """
         Unpack and update door closing time parameters
         : param: response : input 135 packag
@@ -434,7 +435,7 @@ class ThousandLib:
         else:
             return '-1', self.rs232Codes.PARTIAL_ERR.name
 
-    def __unpack_signal(self, signal: Any, response: list) -> tuple[str, str]:
+    def __unpack_signal(self, signal: Any, response: Any) -> tuple[str, str]:
         """
         Unpack signals depending on signal_type
         :param: signal: the signal to unpack.
@@ -480,7 +481,7 @@ class ThousandLib:
 
         return unpacked_as_str, self.rs232Codes.NO_ERR.name
 
-    def __validate_bytes(self, signal: Any, response: list) -> None:
+    def __validate_bytes(self, signal: Any, response: Any) -> None:
         """
         Validate response from serial buffer.
         Validates that the required number of bytes exists in response.
@@ -503,7 +504,7 @@ class ThousandLib:
             raise ValueError("Bad data received on serial bus?")
 
     @staticmethod
-    def __unpack_uint(signal: Any, response: list) -> int:
+    def __unpack_uint(signal: Any, response: Any) -> int:
         """
         Unpack uint32 packed as little endian.
 
@@ -517,7 +518,7 @@ class ThousandLib:
             data_out = data_out | response[signal.byte_start+i]
         return data_out
 
-    def __unpack_weekly_timer(self, signal: Any, response: list) -> int:
+    def __unpack_weekly_timer(self, signal: Any, response: Any) -> int:
         """
         Unpack signals that are set as max seconds in a week (60*60*24*7) and ticks down.
         A value of (max_time - unpacked_time) = 20 means that the alarm occurred 20 seconds ago
@@ -533,7 +534,7 @@ class ThousandLib:
         return unpacked_time
 
     @staticmethod
-    def __unpack_byte(signal: Any, response: list) -> int:
+    def __unpack_byte(signal: Any, response: Any) -> int:
         """
         Unpack signals of size 8 bits or fewer.
 
@@ -546,7 +547,7 @@ class ThousandLib:
         data_out = data_out & (pow(2, signal.bit_size)-1)
         return data_out
 
-    def __unpack_string(self, signal: Any, response: list) -> str:
+    def __unpack_string(self, signal: Any, response: Any) -> str:
         """
         Unpack a list of bytes packed as ascii and returns a string of chars.
         Breaks at NULL and ignores other unsupported characters.
@@ -566,7 +567,7 @@ class ThousandLib:
                 data_out += unpacked_char
         return data_out
 
-    def __unpack_generic_text(self, signal: Any, response: list) -> str:
+    def __unpack_generic_text(self, signal: Any, response: Any) -> str:
         """
         Unpack a number that can be byte_size long and return as a string.
         Breaks at NULL
@@ -589,7 +590,7 @@ class ThousandLib:
             generic_text = generic_text.replace('_', ' ')
         return generic_text
 
-    def __unpack_as_epoch_time(self, signal: Any, response: list) -> int:
+    def __unpack_as_epoch_time(self, signal: Any, response: Any) -> int:
         """
         Unpack a signal containing seconds since 2001-01-01 and return epoch time (not accounting for leap seconds).
 

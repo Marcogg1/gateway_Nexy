@@ -1,88 +1,68 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 import datetime
 import sys
 import os
 import time
 import serial
 import json
-import socket
 import ast
+from typing import Type, Any
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)))
-from lib.syncTimeHandler import SyncTimeHandler
-from wrappers import printWrapper
-from lib.liftAgent_error_signals import Rs232Code
-from filemgmt.diskHandler import DiskHandler
-from lib.thousandLib import ThousandLib
+from lib.sync_time_handler import SyncTimeHandler
+from lib.error_signals import Rs232Code
+from filemgmt.disk_handler import DiskHandler
+from lib.thousand_lib import ThousandLib
 
 
 class Rs232Handler:
 
-    def __init__(self):
+    def __init__(self) -> None:
         """
         Initializes the rs232 serial client and variables
         """
         self.rs232Codes = Rs232Code
-        self.name = self.rs232Codes.SOURCE.value
-        self.print = printWrapper.Print(self.name).print
+        self.name: str = self.rs232Codes.SOURCE.value
+        self.print = print  # TODO: Remove
         self.dh = DiskHandler()
-        self.rs_port = "/dev/ttymxc1"
+        self.rs_port: str = "/dev/ttymxc1"
         self.client = None
-        self.digisign_simulator = False
-        self.buffer_size = 1024
-        self.data_sep = 'x'
-        self.serial_timeout = 0.5
-        self.polled_file_package = 0
-        self.saved_operation_notifications = []
-        self.saved_vfdResult_notification = []
-        self.door_closing_time_type = '135'
-        self.status_type = '130'
+        self.data_sep: str = 'x'
+        self.serial_timeout: float = 0.5
+        self.polled_file_package: int = 0
+        self.saved_operation_notifications: list = []
+        self.saved_vfdResult_notification: list = []
+        self.door_closing_time_type: str = '135'
+        self.status_type: str = '130'
 
-        self.polled_packages = []
-        self.supported_cmds = ['operation', 'liftRef1', 'liftRef2', 'liftName', 'version', 'oilLevel', 'logfile', 'time',
+        self.polled_packages: list = []
+        self.supported_cmds: list = ['operation', 'liftRef1', 'liftRef2', 'liftName', 'version', 'oilLevel', 'logfile', 'time',
                                'readFile', 'writeFile', 'childLock', 'floorLock', 'vfdClearTable', 'vfdId', 'vfdRead', 'getOpenCount']
-        self.always_polled_packages = ['liftRef1', 'liftRef2', 'liftName', 'version', '130', '2', '131', '134', '133', 'doorOpenCount']
-        self.file_packages = ['readFileParam', 'readFileIntern', 'readFileNode', 'readFileLock', 'readFileDoor']
-        self.notification_operation_packages = [self.door_closing_time_type, self.status_type]
-        self.valid_file_names = ['/aritco/param', '/aritco/intern', '/aritco/node', '/aritco/lock', '/aritco/door']
+        self.always_polled_packages: list = ['liftRef1', 'liftRef2', 'liftName', 'version', '130', '2', '131', '134', '133', 'doorOpenCount']
+        self.file_packages: list = ['readFileParam', 'readFileIntern', 'readFileNode', 'readFileLock', 'readFileDoor']
+        self.notification_operation_packages: list = [self.door_closing_time_type, self.status_type]
+        self.valid_file_names: list = ['/aritco/param', '/aritco/intern', '/aritco/node', '/aritco/lock', '/aritco/door']
 
         # These are the versions required for doorOpen commands to work for [U1, U16]
-        self.doorOpenCount_version_limits = ["4.7", "1.2"]
-        self.logfile_length_version_limits = ["4.7", "1.3"]
+        self.doorOpenCount_version_limits: list = ["4.7", "1.2"]
+        self.logfile_length_version_limits: list = ["4.7", "1.3"]
 
-        self.tl = ThousandLib()
+        self.tl: type[ThousandLib] = ThousandLib()
 
-        self.rs_dev_file = os.path.join(os.path.sep, "opt", "smartlift", "rs_dev")
-        if os.path.exists(self.rs_dev_file):
-            with open(self.rs_dev_file, 'r') as f:
-                line = f.read().split()[0]
-                if line == "1":
-                    self.print("Using simulator client")
-                    host = "195.82.43.207"
-                    port = 56250
-                    self.server_address_port = (host, port)
-                    self.client = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
-                    self.digisign_simulator = True
-                    input = "{\"cmd\":\"liftRef1\",\"data\":\"1337867\"}"
-                    input_enc = input.encode('utf-8')
-                    self.client.sendto(input_enc, self.server_address_port)
+        try:
+            self.client = serial.Serial(port=self.rs_port,
+                                        baudrate=38400,
+                                        parity=serial.PARITY_NONE,
+                                        stopbits=serial.STOPBITS_ONE,
+                                        bytesize=serial.EIGHTBITS)
+        except Exception as error:
+            print(error)
+            self.print(f"Port f{self.rs_port} not found. Running on VM?")
 
-        if not self.digisign_simulator:
-            try:
-                self.client = serial.Serial(port=self.rs_port,
-                                            baudrate=38400,
-                                            parity=serial.PARITY_NONE,
-                                            stopbits=serial.STOPBITS_ONE,
-                                            bytesize=serial.EIGHTBITS)
-            except Exception as error:
-                print(error)
-                self.print(f"Port f{self.rs_port} not found. Running on VM?")
+    def __serial_available(self) -> bool:
+        return self.client is not None
 
-    def __serial_available(self):
-        ser_available = self.client is not None
-        return ser_available
-
-    def __set_1000_file_dir(self, file_path):
+    def __set_1000_file_dir(self, file_path: str) -> bool:
 
         try:
             os.makedirs(file_path, exist_ok=True)
@@ -92,22 +72,11 @@ class Rs232Handler:
             return False
         return True
 
-    def __set_prod_load_test_file_dir(self, file_path):
-
-        try:
-            os.makedirs(file_path, exist_ok=True)
-        except OSError as e:
-            self.print("Failed to create " + file_path + ". Prod load test file will not be stored")
-            self.print(e)
-            return False
-        return True
-
     def handle_sync_time_request(self, time_value):
         sync_time_handler = SyncTimeHandler()
         return sync_time_handler.sync_time_rs232(time_value=time_value)
 
-    def __validate_input_filetype(self, args, args_len):
-
+    def __validate_input_filetype(self, args: list, args_len: int) -> str:
         if not isinstance(args, list) or len(args) != args_len:
             self.print(f"Error: not list or number of input arguments  {args} != {args_len}")
             return self.rs232Codes.ARGS_IN_LEN_ERR.name
@@ -118,25 +87,24 @@ class Rs232Handler:
                     int(x,0)
                 else:
                     int(x)
-
         except ValueError:
             self.print("Error: could not convert args to int")
             return self.rs232Codes.ARGS_IN_ELEM_INT_ERR.name
 
         return self.rs232Codes.NO_ERR.name
 
-    def __validate_serial_inputs(self, args):
+    def __validate_serial_inputs(self, args: list) -> tuple[Any,Any,Any,Any,Any,Any,str]:
         """
         Tests that signal that is about to be sent through to the AR-GATE is ok
         :param: args:
         :return: <cmd>, <operation_type>, <data>, <file_name>, <id>, <interval>, <err_code>
         """
-        cmd_err = -1
-        type_err = -1
-        data_err = -1
-        file_name_err = -1
-        id_err = -1
-        interval_err = -1
+        cmd_err: int = -1
+        type_err: int = -1
+        data_err: int = -1
+        file_name_err: int = -1
+        id_err: int = -1
+        interval_err: int = -1
 
         if not isinstance(args, list):
             self.print("Error: input argument must be list")
@@ -147,16 +115,16 @@ class Rs232Handler:
                 self.print("Error: input elements must be strings")
                 return cmd_err, type_err, data_err, file_name_err, id_err, interval_err, self.rs232Codes.ARGS_IN_ELEM_ATTR_ERR.name
 
-        cmd = args[0]
+        cmd: str = args[0]
         if cmd not in self.supported_cmds:
             self.print(f"Error: cmd {cmd} not supported. Supported cmds: {self.supported_cmds}")
             return cmd_err, type_err, data_err, file_name_err, id_err, interval_err, self.rs232Codes.CMD_NOT_SUPPORTED.name
 
-        operation_type = ""
-        data = ""
-        file_name = ""
-        id = ""
-        interval = ""
+        operation_type: str = ""
+        data: str = ""
+        file_name: str = ""
+        id: str | int = ""
+        interval: str | int = ""
 
         if cmd == "operation":
             # Expect cmd, operation_type and data next in that order
@@ -216,7 +184,7 @@ class Rs232Handler:
         elif cmd == 'oilLevel':
             if not 1 <= len(args) <= 2:
                 self.print(f"Error: argument list length {len(args)}")
-                return cmd, type_err, data_err; file_name_err, id_err, interval_err, self.rs232Codes.ARGS_IN_LEN_ERR.name
+                return cmd, type_err, data_err, file_name_err, id_err, interval_err, self.rs232Codes.ARGS_IN_LEN_ERR.name
             if len(args) == 2:
                 data = args[1]
             return cmd, operation_type, data, file_name, id, interval, self.rs232Codes.NO_ERR.name
@@ -325,9 +293,9 @@ class Rs232Handler:
 
         else:
             self.print(f"Error: cmd: {cmd} is in supported cmd's list but not actually supported, how?")
-            return cmd, type_err, data_err, file_name_err, self.rs232Codes.CMD_NOT_SUPPORTED.name
+            return cmd, type_err, data_err, file_name_err, id_err, interval_err, self.rs232Codes.CMD_NOT_SUPPORTED.name
 
-    def __decode_and_validate_serial_response(self, rsp):
+    def __decode_and_validate_serial_response(self, rsp: str) -> tuple[Any, str]:
         """
         Validate response from AR-GATE
         :param: rsp: (string) Contains a JSON document
@@ -339,7 +307,7 @@ class Rs232Handler:
             return rsp, self.rs232Codes.SERIAL_COM_ERR.name
 
         try:
-            rsp_json = json.loads(rsp)
+            rsp_json: Any = json.loads(rsp)
         except Exception as error:
             self.print("Error: Failed to convert response to json")
             self.print(error)
@@ -366,14 +334,12 @@ class Rs232Handler:
 
         try:
             if "logs" in rsp_json:
-                rsp_logs = rsp_json["logs"]
-                if not isinstance(rsp_logs, list):
+                if not isinstance(rsp_json["logs"], list):
                     self.print("Error: Logs not list")
                     return rsp_json, self.rs232Codes.JSON_VALUE_TYPE_ERR.name
 
             elif rsp_json["cmd"] == "time":
-                rsp_data = rsp_json["updated"]
-                if not isinstance(rsp_data, str):
+                if not isinstance(rsp_json["updated"], str):
                     self.print("Error: time response not string")
                     return rsp_json, self.rs232Codes.JSON_VALUE_TYPE_ERR.name
 
@@ -471,7 +437,7 @@ class Rs232Handler:
 
         return rsp_json, self.rs232Codes.NO_ERR.name
 
-    def write_serial(self, args):
+    def write_serial(self, args: list) -> tuple[Any, Any, Any, str, str]:
         """
         Write data on serial bus. If simulator is running, send to socket instead.
         :param: args: (list)
@@ -486,61 +452,56 @@ class Rs232Handler:
             self.print("Error: Failed to validate serial inputs.")
             return cmd, operation_type, data, self.name, err_code
 
-        write = ""
+        msg: str = ""
         if cmd == "operation":
             if data:
-                write = f'{{"cmd":"{cmd}","type":{operation_type},"data":{data}}}'
+                msg = f'{{"cmd":"{cmd}","type":{operation_type},"data":{data}}}'
             else:
-                write = f'{{"cmd":"{cmd}","type":{operation_type}}}'
+                msg = f'{{"cmd":"{cmd}","type":{operation_type}}}'
         elif cmd == "liftRef1" or cmd == "liftRef2" or cmd == "liftName" or cmd == 'oilLevel':
             if data:
-                write = f'{{"cmd":"{cmd}","data":"{data}"}}'
+                msg = f'{{"cmd":"{cmd}","data":"{data}"}}'
             else:
-                write = f'{{"cmd":"{cmd}"}}'
+                msg = f'{{"cmd":"{cmd}"}}'
         elif cmd == "time":
-            write = f'{{"cmd":"{cmd}","data":"{data}"}}'
+            msg = f'{{"cmd":"{cmd}","data":"{data}"}}'
         elif cmd == "version":
-            write = f'{{"cmd":"{cmd}"}}'
+            msg = f'{{"cmd":"{cmd}"}}'
         elif cmd == "getOpenCount":
-            write = f'{{"cmd":"{cmd}"}}'
+            msg = f'{{"cmd":"{cmd}"}}'
         elif cmd == "logfile":
             # check U16 and U1 version
             if self.check_if_above_or_equal_to_versions(self.logfile_length_version_limits):
-                write = f'{{"cmd":"{cmd}","data":"{data}"}}'
-                self.print(f'U16 SW version 1.3 or higher and U1 SW version 4.7 or higher. Writing {write}')
+                msg = f'{{"cmd":"{cmd}","data":"{data}"}}'
+                self.print(f'U16 SW version 1.3 or higher and U1 SW version 4.7 or higher. Writing {msg}')
             else:
-                write = f'{{"cmd":"{cmd}"}}'
+                msg = f'{{"cmd":"{cmd}"}}'
                 data = '0'
-                self.print(f'U16 SW version 1.2 or lower and U1 SW version 4.6 or lower. Writing {write}')
+                self.print(f'U16 SW version 1.2 or lower and U1 SW version 4.6 or lower. Writing {msg}')
         elif cmd == "readFile":
-            write = f'{{"cmd":"{cmd}", "name":"{file_name}"}}'
+            msg = f'{{"cmd":"{cmd}", "name":"{file_name}"}}'
         elif cmd == "writeFile":
-            write = f'{{"cmd":"{cmd}", "name":"{file_name}", "data":"{data}"}}'
+            msg = f'{{"cmd":"{cmd}", "name":"{file_name}", "data":"{data}"}}'
         elif cmd == "childLock":
-            write = f'{{"cmd":"{cmd}", "data":"{data}"}}'
+            msg = f'{{"cmd":"{cmd}", "data":"{data}"}}'
         elif cmd == "floorLock":
-            write = f'{{"cmd":"{cmd}", "data":"{data}"}}'
+            msg = f'{{"cmd":"{cmd}", "data":"{data}"}}'
         elif cmd == "vfdClearTable":
-            write = f'{{"cmd":"{cmd}"}}'
+            msg = f'{{"cmd":"{cmd}"}}'
         elif cmd == "vfdId":
-            write = f'{{"cmd":"{cmd}", "data":"{data}"}}'
+            msg = f'{{"cmd":"{cmd}", "data":"{data}"}}'
         elif cmd == "vfdRead":
-            write = f'{{"cmd":"{cmd}", "id":{id}, "data":"{data}", "interval":{interval}}}'
-        if not write:
+            msg = f'{{"cmd":"{cmd}", "id":{id}, "data":"{data}", "interval":{interval}}}'
+        if not msg:
             self.print("Error: Somehow unsupported cmd fell through validation.")
             return cmd, operation_type, data, self.name, self.rs232Codes.ARGS_IN_ELEM_ATTR_ERR.name
 
-        self.print(f"Writing {write}")
-        write_enc = write.encode('utf-8')
-
-        if self.digisign_simulator:
-            self.client.sendto(write_enc, self.server_address_port)
-        else:
-            self.client.write(write_enc)
+        self.print(f"Writing {msg}")
+        self.client.write(msg.encode('utf-8'))
 
         return cmd, operation_type, data, self.name, err_code
 
-    def read_serial(self):
+    def read_serial(self) -> tuple[Any, Any]:
         """
         Reads the serial buffer. Retries 5 times if buffer is empty.
         :return: rsp_full: (string) Everything that was read from the buffer.
@@ -550,44 +511,31 @@ class Rs232Handler:
             self.print("Error: Serial not available for read")
             return -1, self.rs232Codes.SERIAL_COM_ERR.name
 
-        rsp = ''
-        retries = 5
-        i = 0
+        rsp: str = ''
+        retries: int = 5
+        i: int = 0
         while i < retries:
-            if self.digisign_simulator:
-                while True:
-                    try:
-                        # Try reading receive queue until its empty. recv will throw BlockingIOError when queue is empty
-                        rsp += self.client.recv(self.buffer_size, socket.MSG_DONTWAIT).decode('utf-8')
-                    except BlockingIOError:
-                        break
-                    except Exception as error:
-                        self.print("Something went wrong when reading data from simulator.")
-                        self.print(error)
-                        return -1, self.rs232Codes.SERIAL_COM_ERR.name
-
-            else:
-                try:
-                    if self.client.inWaiting() > 0:
-                        waiting_bytes = self.client.inWaiting()
-                        rsp += self.client.read(size=waiting_bytes).decode('utf-8')
-                except serial.SerialException as error:
-                    self.print("Error: Serial read exception")
-                    self.print(error)
-                    return -1, self.rs232Codes.SERIAL_COM_ERR.name
-                except UnicodeDecodeError as error:
-                    self.print(f"Error: Failed to decode serial bytes. Previous rsp: {rsp}")
-                    self.print(error)
-                    return -1, self.rs232Codes.SERIAL_DECODE_ERR.name
+            try:
+                if self.client.inWaiting() > 0:
+                    waiting_bytes = self.client.inWaiting()
+                    rsp += self.client.read(size=waiting_bytes).decode('utf-8')
+            except serial.SerialException as error:
+                self.print("Error: Serial read exception")
+                self.print(error)
+                return -1, self.rs232Codes.SERIAL_COM_ERR.name
+            except UnicodeDecodeError as error:
+                self.print(f"Error: Failed to decode serial bytes. Previous rsp: {rsp}")
+                self.print(error)
+                return -1, self.rs232Codes.SERIAL_DECODE_ERR.name
 
             if not rsp:
                 i += 1
-                self.print(f"No waiting bytes, try {i}/{retries}")
+                self.print(f"No waiting bytes, attempt {i}/{retries}")
                 if i < retries:
-                    time.sleep(self.serial_timeout)  # Previous timeout = 1
+                    time.sleep(self.serial_timeout)
             else:
                 if not rsp.endswith('}'):
-                    time.sleep(self.serial_timeout)  # Previous timeout = 0.25
+                    time.sleep(self.serial_timeout)
                 else:
                     if not rsp.startswith('{'):
                         substring = rsp[:rsp.find('{')]
@@ -600,7 +548,7 @@ class Rs232Handler:
         self.print(f"Error: No waiting bytes found after {retries} tries.")
         return -1, self.rs232Codes.NO_WAITING_BYTES_ERR.name
 
-    def __split_response(self, rsp_full, wanted_cmd, wanted_type=''):
+    def __split_response(self, rsp_full: Any, wanted_cmd: str, wanted_type: str='') -> tuple[Any, Any, Any, str]:
         """
         Split response from AR-Gate in to status, wanted_cmd/wanted_type and other commands/types.
         Other is anything but status and wanted cmd/type (there shouldn't be any).
@@ -645,13 +593,13 @@ class Rs232Handler:
 
         # Reformat to json
         # List conversion above reformats double-quotes to single quotes which later will break any `json.loads()`
-        rsp_json = []
+        rsp_json: list = []
         for r in rsp_list:
             rsp_json.append(json.dumps(r))
 
         # Validate each response
-        err_code = self.rs232Codes.NO_ERR.name
-        rsp_dec = []
+        err_code: str = self.rs232Codes.NO_ERR.name
+        rsp_dec: list = []
         for rsp in rsp_json:
             rsp_tmp, err_code = self.__decode_and_validate_serial_response(rsp)
             if err_code != self.rs232Codes.NO_ERR.name:
@@ -661,9 +609,9 @@ class Rs232Handler:
                 rsp_dec.append(rsp_tmp)
 
         # Which field to check will probably have to change in the future
-        rsp_status = []
-        rsp_wanted = []
-        rsp_other = []
+        rsp_status: list = []
+        rsp_wanted: list = []
+        rsp_other: list = []
         for rsp in rsp_dec:
             if 'logs' in rsp:
                 rsp_wanted = rsp
@@ -703,7 +651,7 @@ class Rs232Handler:
         else:
             return rsp_status or '', rsp_wanted or '', rsp_other or '', err_code
 
-    def get_signal_from_serial_buffer(self, wanted_command, wanted_type=''):
+    def get_signal_from_serial_buffer(self, wanted_command: str, wanted_type: str='') -> tuple[Any, Any, Any, str]:
         """
         Read serial buffer until wanted signal is found (or max 5s).
         Always writes status to file.
@@ -712,8 +660,8 @@ class Rs232Handler:
         :return wanted_out: (list) Contains the wanted signal. Not appended, functions return when its found.
         :return other_out: (list) Contains everything that shouldn't really be here.
         """
-        retries = 5
-        other_out = []
+        retries: int = 5
+        other_out: list = []
         for i in range(retries):
             full_resp, err_code = self.read_serial()
             if err_code != self.rs232Codes.NO_ERR.name:
@@ -746,7 +694,7 @@ class Rs232Handler:
             self.print(f"Error: No response received in {retries} tries. Serial buffer empty?")
             return -1, -1, -1, self.rs232Codes.SERIAL_COM_ERR.name
 
-    def get_generic_text(self, package):
+    def get_generic_text(self, package: str) -> tuple[Any, str, str]:
         """
         Request and return some generic text (liftRef1, liftRef2, liftName (1010, 1011)
         :return: -1 if call failed, <name> , <err_code>
@@ -755,7 +703,7 @@ class Rs232Handler:
             self.print(f"Package is empty or not supported: {package}")
             return -1, self.name, self.rs232Codes.CMD_NOT_SUPPORTED.name
 
-        cmd, operation_type, data, name, err_code = self.write_serial([package])
+        _, _, _, _, err_code = self.write_serial([package])
         if err_code != self.rs232Codes.NO_ERR.name:
             self.print(f"Error: failed to write AR read request to the serial bus.")
             return -1, self.name, err_code
@@ -768,15 +716,15 @@ class Rs232Handler:
             return -1, self.name, err_code
 
         # Response must be in format <list>
-        response = [resp_wanted[0]['data']]
+        response: list = [resp_wanted[0]['data']]
         return response, self.name, err_code
 
-    def set_RTC(self, args):
+    def set_RTC(self, args: list) -> tuple[Any, str, str]:
         """
         Set the RTC timer
         :param epoch_time: The epoch time to set the RTC to.
         """
-        epoch_time = args[0]
+        epoch_time: str = args[0]
         try:
             int(epoch_time)
         except ValueError as e:
@@ -787,14 +735,14 @@ class Rs232Handler:
             epoch_time = str(self.handle_sync_time_request(epoch_time))
             self.print(f"Got time -1, setting UTC_time:{epoch_time}")
 
-        cmd, operation_type, data, name, err_code = self.write_serial(["time", epoch_time])
+        _, _, _, _, err_code = self.write_serial(["time", epoch_time])
         if err_code != self.rs232Codes.NO_ERR.name:
             self.print(f"Error: failed to write time read request to the serial bus.")
             return -1, self.name, err_code
 
         time.sleep(self.serial_timeout)  # Previous timeout = 0.5
         _, resp_wanted, _, err_code = self.get_signal_from_serial_buffer('time')
-        response = resp_wanted[0]['updated']
+        response: str = resp_wanted[0]['updated']
 
         if err_code != self.rs232Codes.NO_ERR.name:
             self.print("Error: Failed to get time read response from serial buffer.")
@@ -805,12 +753,12 @@ class Rs232Handler:
 
         return response, self.name, err_code
 
-    def get_ar_version(self):
+    def get_ar_version(self) -> tuple[Any, str, str]:
         """
         Request and return version (1060, 1061)
         :return: <version> -1 if call failed, <name> , <err_code>
         """
-        cmd, operation_type, data, name, err_code = self.write_serial(["version"])
+        _, _, _, _, err_code = self.write_serial(["version"])
         if err_code != self.rs232Codes.NO_ERR.name:
             self.print("Error: failed to write ARGATE version to the serial bus.")
             return -1, self.name, err_code
@@ -821,21 +769,21 @@ class Rs232Handler:
             self.print("Error: Failed to get ARGATE version from serial buffer.")
             return -1, self.name, err_code
         try:
-            response = resp_wanted[0]['data']
+            response: str = resp_wanted[0]['data']
         except Exception as error:
             self.print("Error: Failed to get ARGATE version read response from serial buffer.")
             self.print(error)
             return -1, self.name, self.rs232Codes.DATA_LEN_ERR.name
         return response, self.name, self.rs232Codes.NO_ERR.name
 
-    def get_updated_open_door_counter_parameters(self, response):
+    def get_updated_open_door_counter_parameters(self, response: Any) -> tuple[list, str]:
         """
         update and calculate parameters for open door counters
         unpack the response from the lift
         check if the lift counters has been reset
         """
-        i = 0
-        total_open_door_counters_to_save = [0] * 6
+        i: int = 0
+        total_open_door_counters_to_save: list = [0] * 6
 
         changed_params, latest_err = self.tl.door_open_count_recalculate(response)
         if latest_err != self.rs232Codes.NO_ERR.name:
@@ -854,7 +802,7 @@ class Rs232Handler:
             self.print("Error: Not able to save total counter file")
 
         if self.tl.reset_saved_open_door_counter:
-            previous_filename = os.path.join(self.dh.get_open_door_counter_file_path(), self.dh.get_open_door_previous_counter_file_filename())
+            previous_filename: str = os.path.join(self.dh.get_open_door_counter_file_path(), self.dh.get_open_door_previous_counter_file_filename())
 
             fname_err, latest_err = self.__write_to_open_door_counter_file(previous_filename, self.tl.previous_open_door_counters)
             if latest_err != self.rs232Codes.NO_ERR.name:
@@ -862,21 +810,21 @@ class Rs232Handler:
 
         return changed_params, latest_err
 
-    def get_door_open_count(self):
+    def get_door_open_count(self) -> tuple[Any, str, str]:
         """
         Get number of door open from 1k
         """
         # Check if reset flag is set and read from if flag is set
 
         if self.tl.reset_saved_open_door_counter:
-            total_filename = os.path.join(self.dh.get_open_door_counter_file_path(), self.dh.get_open_door_total_counter_file_filename())
-            previous_filename = os.path.join(self.dh.get_open_door_counter_file_path(), self.dh.get_open_door_previous_counter_file_filename())
+            total_filename: str = os.path.join(self.dh.get_open_door_counter_file_path(), self.dh.get_open_door_total_counter_file_filename())
+            previous_filename: str = os.path.join(self.dh.get_open_door_counter_file_path(), self.dh.get_open_door_previous_counter_file_filename())
 
             self.tl.total_open_door_counters = self.__read_open_door_counter_from_file(total_filename).copy()
             self.tl.previous_open_door_counters = self.__read_open_door_counter_from_file(previous_filename).copy()
             self.tl.reset_saved_open_door_counter = False
 
-        cmd, operation_type, data, name, err_code = self.write_serial(["getOpenCount"])
+        _, _, _, _, err_code = self.write_serial(["getOpenCount"])
         if err_code != self.rs232Codes.NO_ERR.name:
             self.print("Error: failed to write getOpenCount to the serial bus.")
             return -1, self.name, err_code
@@ -889,14 +837,14 @@ class Rs232Handler:
             return -1, self.name, err_code
 
         try:
-            response = resp_wanted[0]['data']
+            response: str = resp_wanted[0]['data']
         except Exception as error:
             self.print("Error: Failed to get number of times the door open response from serial buffer.")
             self.print(error)
             return -1, self.name, self.rs232Codes.DATA_LEN_ERR.name
         return response, self.name, self.rs232Codes.NO_ERR.name
 
-    def __read_open_door_counter_from_file(self, fname):
+    def __read_open_door_counter_from_file(self, fname: str) -> list:
         """
         Read the data from saved open_door_counter_file
         """
@@ -912,7 +860,7 @@ class Rs232Handler:
 
         return saved_open_door_counters
 
-    def __write_to_open_door_counter_file(self, fname, data):
+    def __write_to_open_door_counter_file(self, fname: str, data: list) -> tuple[str, str]:
         """
         Write open door counter data to file
         """
@@ -948,16 +896,16 @@ class Rs232Handler:
         return fname_err, err_code
 
 
-    def get_logfile(self, args):
+    def get_logfile(self, args: list) -> tuple[str, str, str]:
         """
         Request and return 1k logfile (1065, 1066)
         :param file_type: the type of the log 0x10
         :param data: the number of log block to read
         :return: <logfile_name> 'file_error' if call failed, <name> , <err_code>
         """
-        fname_err = "file_error"
-        exp_file_type = '0x10'
-        err_code = self.__validate_input_filetype(args, 2)
+        fname_err: str = "file_error"
+        exp_file_type: str = '0x10'
+        err_code: str = self.__validate_input_filetype(args, 2)
         if err_code != self.rs232Codes.NO_ERR.name:
             return fname_err, self.name, err_code
 
@@ -965,7 +913,7 @@ class Rs232Handler:
             self.print("Error: not supported file type")
             return fname_err, self.name, self.rs232Codes.DATA_TYPE_ERR.name
 
-        cmd, operation_type, data, name, err_code = self.write_serial(["logfile", args[1]])
+        _, _, _, name, err_code = self.write_serial(["logfile", args[1]])
         if err_code != self.rs232Codes.NO_ERR.name:
             self.print("Error: failed to write 1k logfile to the serial bus.")
             return fname_err, self.name, err_code
@@ -979,12 +927,12 @@ class Rs232Handler:
         fname_full, err_code = self.__write_log_to_file(resp_wanted)
         if err_code != self.rs232Codes.NO_ERR.name:
             self.print("Error: Failed to write logfile to file")
-            return fname_err, self,name, err_code
+            return fname_err, self.name, err_code
 
         return fname_full, self.name, self.rs232Codes.NO_ERR.name
 
-    def read_1k_file(self, args):
-        """
+    def read_1k_file(self, args: list) -> tuple[Any, Any, Any, str, str]:
+        """ 
         Request and return 1k files
         :param args[0]: filename, the name of the 1k file (param/intern/node/lock/door)
         :return: <file_data>, <data>
@@ -994,11 +942,11 @@ class Rs232Handler:
             self.print(f"Error: Wrong number of arguments {len(args)}")
             return -1, -1, -1, self.name, self.rs232Codes.ARGS_IN_LEN_ERR.name
 
-        err_data = -1
-        resp_data = []
-        file_name = args[0]
+        err_data: int = -1
+        resp_data: list = []
+        file_name: str = args[0]
 
-        cmd, _, data, name, err_code = self.write_serial(['readFile', file_name])
+        _, _, _, _, err_code = self.write_serial(['readFile', file_name])
         if err_code != self.rs232Codes.NO_ERR.name:
             self.print("Error: failed to write 1k files to the serial bus.")
             return -1, err_data, file_name, self.name, err_code
@@ -1036,7 +984,7 @@ class Rs232Handler:
 
         return resp_data, file_data_resp, file_name, self.name, err_code
 
-    def write_1k_file(self, args):
+    def write_1k_file(self, args: list) -> tuple[Any, str, str]:
         """
         To store data to 1k file
         :param args (file_name(str), data(list of bytes)
@@ -1047,7 +995,7 @@ class Rs232Handler:
             self.print("Error: Wrong number of arguments")
             return -1, self.name, self.rs232Codes.ARGS_IN_LEN_ERR.name
 
-        file_name = args[0]
+        file_name: str = args[0]
         try:
             data_str = json.dumps({"data": args[1]})
         except Exception as error:
@@ -1055,7 +1003,7 @@ class Rs232Handler:
             self.print(error)
             return file_name, self.name, self.rs232Codes.JSON_ERR.name
 
-        cmd, _, data, name, err_code = self.write_serial(['writeFile', file_name, data_str])
+        _, _, _, _, err_code = self.write_serial(['writeFile', file_name, data_str])
         if err_code != self.rs232Codes.NO_ERR.name:
             self.print("Error: failed to write to serial bus.")
             return file_name, self.name, err_code
@@ -1066,8 +1014,8 @@ class Rs232Handler:
             self.print("Error: Failed to read 1k file data from serial buffer.")
             return file_name, self.name, err_code
 
-        resp_data_dict = resp_data[0]
-        err_status = resp_data_dict["err"]
+        resp_data_dict: dict[Any, Any] = resp_data[0]
+        err_status: str = resp_data_dict["err"]
 
         if err_status != 0:
             self.print("Error: Unable to open or write to 1k file.")
@@ -1075,13 +1023,13 @@ class Rs232Handler:
 
         return file_name, self.name, err_code
 
-    def __write_log_to_file(self, data):
+    def __write_log_to_file(self, data: dict[Any, Any]) -> tuple[Any, str]:
         """
         Write log data to file
         :param data: log data
         return: logfile_name, err_code
         """
-        fname_err = "file_error"
+        fname_err: str = "file_error"
 
         # Check if logfile dir exist and create if not. Return if it fails
         try:
@@ -1092,18 +1040,18 @@ class Rs232Handler:
                     err_code = self.rs232Codes.LOG_FILE_IO_ERR.name
                     return fname_err, err_code
 
-            obj_id, _, err_code = self.read_parameter_1k("0")
+            obj_id, _, err_code = self.read_parameter_1k(["0"])
             if err_code != self.rs232Codes.NO_ERR.name:
                 self.print("Error: Object ID not set")
                 return -1, self.rs232Codes.NO_UPDATED_PARAMS.name
 
-            timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            timestamp: str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
 
-            fname_ret = f'{obj_id}_{timestamp}.eventlog'
-            fname_full = os.path.join(self.dh.get_1000_log_file_path(), fname_ret)
+            fname_ret: str = f'{obj_id}_{timestamp}.eventlog'
+            fname_full: str = os.path.join(self.dh.get_1000_log_file_path(), fname_ret)
 
             # Convert dict to string
-            data_str = json.dumps(data)
+            data_str: str = json.dumps(data)
             if not isinstance(data_str, str):
                 self.print("Error: log data not converted to string before write to file")
                 return -1, self.rs232Codes.DATA_TYPE_ERR.name
@@ -1132,20 +1080,20 @@ class Rs232Handler:
 
         return fname_full, err_code
 
-    def write_generic_text(self, args):
+    def write_generic_text(self, args: list) -> tuple[Any, str, str]:
         """
         Write new generic text and return it (1010, 1011)
         :param args: arg[0] liftRef1/liftRef2/liftName, arg[1] new_text
         :return: <name>, <err_code>
         """
-        package = args[0]
-        new_text = args[1]
+        package: str = args[0]
+        new_text: str = args[1]
 
         if package not in ["liftRef1", "liftRef2", "liftName"]:
             self.print(f"Error: Unsupported generic text package: {package}")
             return -1, self.name, self.rs232Codes.CMD_NOT_SUPPORTED.name
 
-        cmd, operation_type, data, name, err_code = self.write_serial([package, new_text])
+        _, _, _, _, err_code = self.write_serial([package, new_text])
         if err_code != self.rs232Codes.NO_ERR.name:
             self.print(f"Error: failed to write generic text to the serial bus.")
             return -1, self.name, err_code
@@ -1163,18 +1111,18 @@ class Rs232Handler:
 
         return resp_wanted[0]['data'], self.name, err_code
 
-    def reset_service_memory(self):
+    def reset_service_memory(self) -> tuple[str, str]:
         """
         Request reset of service memory. Returns an empty list on success. (1020, 1021)
         :return: <service_memory> -1 if call failed, <name> , <err_code>
         """
-        cmd, operation_type, data, name, err_code = self.write_serial(["operation", "132"])
+        _, _, _, _, err_code = self.write_serial(["operation", "132"])
         if err_code != self.rs232Codes.NO_ERR.name:
             self.print(f"Error: failed to send reset service memory to the serial bus.")
             return self.name, err_code
 
         time.sleep(self.serial_timeout)  # Previous timeout = 0.5
-        _, resp_wanted, _, err_code = self.get_signal_from_serial_buffer("operation", "132")
+        _, _, _, err_code = self.get_signal_from_serial_buffer("operation", "132")
 
         if err_code != self.rs232Codes.NO_ERR.name:
             self.print("Error: Failed to get reset service memory response from serial buffer.")
@@ -1182,7 +1130,7 @@ class Rs232Handler:
 
         return self.name, err_code
 
-    def set_child_lock(self, data):
+    def set_child_lock(self, data: str) -> tuple[Any, str, str]:
         """
         Sets the childLock to either on or off. ChildLock status is read through the 130 package.
         """
@@ -1190,7 +1138,7 @@ class Rs232Handler:
             self.print(f"Error: Child lock ata must be either 'on' or 'off', '{data}' is not supported")
             return -1, self.name, self.rs232Codes.DATA_ERR.name
 
-        cmd, _, data, name, err_code = self.write_serial(["childLock", data])
+        _, _, data, _, err_code = self.write_serial(["childLock", data])
         if err_code != self.rs232Codes.NO_ERR.name:
             self.print("Error: Failed to write childLock to the serial bus.")
             return -1, self.name, err_code
@@ -1216,12 +1164,12 @@ class Rs232Handler:
 
         return response, self.name, self.rs232Codes.NO_ERR.name
 
-    def set_floor_lock(self, data_in):
+    def set_floor_lock(self, data_in: str) -> tuple[Any, str, str]:
         """
         Sets floorLock to selected floors.
         """
 
-        cmd, _, data, name, err_code = self.write_serial(["floorLock", data_in])
+        _, _, _, _, err_code = self.write_serial(["floorLock", data_in])
         if err_code != self.rs232Codes.NO_ERR.name:
             self.print("Error: Failed to write floorLock to the serial bus.")
             return -1, self.name, err_code
@@ -1247,11 +1195,11 @@ class Rs232Handler:
 
         return response, self.name, self.rs232Codes.NO_ERR.name
 
-    def set_oil_level(self, data_in, previous_oilLevel):
+    def set_oil_level(self, data_in: str, previous_oilLevel: int) -> tuple[Any, str, str]:
         """
         Sets oil level
         """
-        cmd, _, data, name, err_code = self.write_serial(["oilLevel", data_in])
+        _, _, _, _, err_code = self.write_serial(["oilLevel", data_in])
         if err_code != self.rs232Codes.NO_ERR.name:
             self.print(f"Error: Failed to write oilLevel to serial bus")
             return -1, self.name, err_code
@@ -1277,14 +1225,14 @@ class Rs232Handler:
 
         return response, self.name, self.rs232Codes.NO_ERR.name
 
-    def get_notification(self):
+    def get_notification(self) -> tuple[list, str]:
         """
         Filter package data by notification type and update parameters
         """
-        filtered_notification_pkg = []
-        response = ""
-        latest_err_code = self.rs232Codes.NO_ERR.name
-        door_parameter = []
+        filtered_notification_pkg: list = []
+        response: str = ""
+        latest_err_code: str = self.rs232Codes.NO_ERR.name
+        door_parameter: list = []
 
         if len(self.saved_operation_notifications) > 0:
             for saved_rsp in self.saved_operation_notifications:
@@ -1308,34 +1256,34 @@ class Rs232Handler:
 
         return door_parameter, latest_err_code
 
-    def vfd_clear_table(self):
+    def vfd_clear_table(self) -> tuple[str, str]:
         """
             Send a request to clear the command table of the A-ModCom board
             Return response on success. (1070, 1071)
         """
 
-        cmd, _, _, name, err_code = self.write_serial(["vfdClearTable"])
+        _, _, _, _, err_code = self.write_serial(["vfdClearTable"])
         if err_code != self.rs232Codes.NO_ERR.name:
             self.print("Error: failed to send clear table command to A-ModCom board")
             return self.name, err_code
 
         time.sleep(self.serial_timeout)
 
-        _, resp_wanted, _, err_code = self.get_signal_from_serial_buffer("vfdClearTable")
+        _, _, _, err_code = self.get_signal_from_serial_buffer("vfdClearTable")
         if err_code != self.rs232Codes.NO_ERR.name:
             self.print("Error: Failed to get clear table response from serial buffer.")
 
         return self.name, err_code
 
-    def set_vfd_id_1k(self, args):
+    def set_vfd_id_1k(self, args: list) -> tuple[Any, str, str]:
         """
         Set id on 1k vfd by a generic data string sent out on modbus via U19 (1075, 1076)
         :param: in_data string
         :return:  response, name, err
         """
 
-        vfd_err_code = -1
-        expected_len_args = 1
+        vfd_err_code: int = -1
+        expected_len_args: int = 1
 
         if len(args) != expected_len_args:
             self.print(f"Error: Wrong number of arguments, got: {len(args)}, expected {expected_len_args}")
@@ -1347,7 +1295,7 @@ class Rs232Handler:
 
         request_data = args[0].replace("-", ",")
 
-        cmd, _, data, name, latest_err = self.write_serial(["vfdId", request_data])
+        _, _, _, _, latest_err = self.write_serial(["vfdId", request_data])
         if latest_err != self.rs232Codes.NO_ERR.name:
             self.print(f"Error: Failed to write vfdId to serial bus")
             return -1, self.name, latest_err
@@ -1358,7 +1306,7 @@ class Rs232Handler:
             return -1, self.name, latest_err
 
         try:
-            response = resp_wanted[0]["data"]
+            response: Any = resp_wanted[0]["data"]
             vfd_err_code = resp_wanted[0]["error"]
         except Exception as e:
             print(f"Exception vfd err: {e}")
@@ -1378,7 +1326,7 @@ class Rs232Handler:
 
         return response, self.name, latest_err
 
-    def set_vfd_read_1k(self, args):
+    def set_vfd_read_1k(self, args: list) -> tuple[str, str]:
         """
         Set id on 1k vfd by a generic data string sent out on modbus via U19 (1080, 1081)
         :param: id int, in_data string, interval int
@@ -1386,12 +1334,12 @@ class Rs232Handler:
         :param: in_data string
         :return:  name, err
         """
-        vfd_err_code = -1
-        expected_len_args = 3
+        vfd_err_code: int = -1
+        expected_len_args: int = 3
 
         if len(args) != expected_len_args:
             self.print(f"Error: Wrong number of arguments, got: {len(args)}, expected {expected_len_args}")
-            return  self.name, self.rs232Codes.ARGS_IN_LEN_ERR.name
+            return self.name, self.rs232Codes.ARGS_IN_LEN_ERR.name
 
         if not isinstance(args[1], str):
             self.print("Error: In data is not string")
@@ -1399,7 +1347,7 @@ class Rs232Handler:
 
         request_data = args[1].replace("-", ",")
 
-        cmd, _, data, name, latest_err = self.write_serial(["vfdRead", args[0], request_data, args[2]])
+        _, _, _, _, latest_err = self.write_serial(["vfdRead", args[0], request_data, args[2]])
         if latest_err != self.rs232Codes.NO_ERR.name:
             self.print(f"Error: Failed to write vfdRead to serial bus")
             return self.name, latest_err
@@ -1410,7 +1358,7 @@ class Rs232Handler:
             return self.name, latest_err
 
         try:
-            response = resp_wanted[0]["id"]
+            resp_wanted[0]["id"]
             vfd_err_code = resp_wanted[0]["error"]
         except Exception as e:
             print(f"Exception vfd err: {e}")
@@ -1424,10 +1372,10 @@ class Rs232Handler:
 
         return self.name, latest_err
 
-    def get_vfd_motor_data(self):
+    def get_vfd_motor_data(self) -> tuple[Any, str]:
 
-        params = []
-        err_code = self.rs232Codes.NO_ERR.name
+        params: list = []
+        err_code: str = self.rs232Codes.NO_ERR.name
 
         if len(self.saved_vfdResult_notification) > 0:
             for saved_rsp in self.saved_vfdResult_notification:
@@ -1437,30 +1385,30 @@ class Rs232Handler:
                     params.append(param[0])
 
         self.saved_vfdResult_notification = []
-
+        # TODO: Make a list, not set
         return set(params), err_code
 
-    def poll_lift(self, args):
+    def poll_lift(self, args: list) -> tuple[Any, str, str]:
         """
         Updates all params and return list of updated params (1045, 1046)
         :return: <updated_parameters> -1 if call failed, <name> , <err_code>
         poll_type = 0 read only one file packages per poll
         poll_type = 1 read all file packages per poll
         """
-        err_code = self.rs232Codes.NO_ERR.name
-        updated_parameters = []
-        expected_len_args = 1
+        err_code: str = self.rs232Codes.NO_ERR.name
+        updated_parameters: list = []
+        expected_len_args: int = 1
         if len(args) != expected_len_args:
             self.print(f"Error: Wrong number of arguments, got: {len(args)}, expected {expected_len_args}")
             return -1, self.name, self.rs232Codes.ARGS_IN_LEN_ERR.name
 
-        poll_type = args[0]
+        poll_type: str = args[0]
 
         self.polled_packages = self.always_polled_packages[:]
         if poll_type == '1':
             self.polled_packages += self.file_packages
         elif poll_type == '0':
-            current_file_package = self.file_packages[self.polled_file_package]
+            current_file_package: str = self.file_packages[self.polled_file_package]
             self.polled_packages.append(current_file_package)
             self.polled_file_package += 1
             if self.polled_file_package >= len(self.file_packages):
@@ -1485,15 +1433,15 @@ class Rs232Handler:
             elif package == "doorOpenCount":
                 response, self.name, latest_err_code = self.get_door_open_count()
             elif package == "readFileParam":
-                _, response, file_name, self.name, latest_err_code = self.read_1k_file(["/aritco/param"])
+                _, response, _, self.name, latest_err_code = self.read_1k_file(["/aritco/param"])
             elif package == "readFileIntern":
-                _, response, file_name, self.name, latest_err_code = self.read_1k_file(['/aritco/intern'])
+                _, response, _, self.name, latest_err_code = self.read_1k_file(['/aritco/intern'])
             elif package == "readFileNode":
-                _, response, file_name, self.name, latest_err_code = self.read_1k_file(['/aritco/node'])
+                _, response, _, self.name, latest_err_code = self.read_1k_file(['/aritco/node'])
             elif package == "readFileLock":
-                _, response, file_name, self.name, latest_err_code = self.read_1k_file(['/aritco/lock'])
+                _, response, _, self.name, latest_err_code = self.read_1k_file(['/aritco/lock'])
             elif package == "readFileDoor":
-                _, response, file_name, self.name, latest_err_code = self.read_1k_file(['/aritco/door'])
+                _, response, _, self.name, latest_err_code = self.read_1k_file(['/aritco/door'])
             else:
                 response, self.name, latest_err_code = self.get_operation_package(package)
 
@@ -1508,8 +1456,8 @@ class Rs232Handler:
                 continue
 
             if package == 'doorOpenCount':
-                new_parameters = []
-                new_open_door_counters_parameters, open_door_update_err = self.get_updated_open_door_counter_parameters(response)
+                new_parameters: list = []
+                new_open_door_counters_parameters, _ = self.get_updated_open_door_counter_parameters(response)
             else:
                 new_open_door_counters_parameters = []
                 new_parameters, latest_err_code = self.tl.get_updated_params(package, response)
@@ -1563,7 +1511,7 @@ class Rs232Handler:
             return -1, self.name, self.rs232Codes.DATA_TYPE_ERR.name
         return response, self.name, err_code
 
-    def get_available_params(self):
+    def get_available_params(self) -> tuple[str, str, str]:
         """
         Updates all params and return list of updated params (1055, 1056)
         :return: <available_parameters> -1 if call failed, <name> , <err_code>
@@ -1573,11 +1521,11 @@ class Rs232Handler:
         if not params:
             return "0", self.name, self.rs232Codes.NO_PARAMS_IN_DB.name
 
-        response = self.data_sep.join(str(elem) for elem in params)
+        response: str = self.data_sep.join(str(elem) for elem in params)
 
         return response, self.name, self.rs232Codes.NO_ERR.name
 
-    def get_latest_status(self):
+    def get_latest_status(self) -> tuple[Any, str, str]:
         """
         Read the 130 packages and return the latest package
         """
@@ -1593,65 +1541,65 @@ class Rs232Handler:
 
         return status_last, self.name, err_code
 
-    def read_parameter_1k(self, args):
+    def read_parameter_1k(self, args: list) -> tuple[int, str, str]:
         """
         Get parameter for stored values. (1030,1031)
         """
         value, err_code = self.tl.get_param(int(args[0]))
         return value, self.name, err_code
 
-    def write_parameter_1k(self, args):
+    def write_parameter_1k(self, args: list) -> tuple[int, str, str]:
         """
         Read the file, replace the parameter we are writing to, save the file. (1040,1041)
         """
-
+        data: Any
         # Validate input args
         expected_len_args = 2
         if len(args) != expected_len_args:
             self.print(f"Error: Wrong number of arguments, got: {len(args)}, expected {expected_len_args}")
             return -1, self.name, self.rs232Codes.ARGS_IN_LEN_ERR.name
 
-        param = args[0]
-        value = args[1]
+        param_str: str = args[0]
+        value_str: str = args[1]
         try:
-            param = int(param)
-            value = int(value)
+            param_int: int = int(param_str)
+            value_int: int = int(value_str)
         except (ValueError, TypeError) as e:
-            self.print(f"Error: Unable to identify in params for writing 1k param: {param}, {value}")
+            self.print(f"Error: Unable to identify in params for writing 1k param: {param_str}, {value_str}")
             self.print(e)
             return -1, self.name, self.rs232Codes.ARGS_IN_ELEM_INT_ERR.name
 
         # Check if param already has requested value, if so, do nothing and return gracefully
-        current_val, _, err_code = self.read_parameter_1k([str(param)])
-        if err_code == self.rs232Codes.NO_ERR.name and current_val == str(value):
-            self.print(f"Param {param} already has value {value}, returning gracefully")
+        current_val, _, err_code = self.read_parameter_1k([param_str])
+        if err_code == self.rs232Codes.NO_ERR.name and current_val == value_str:
+            self.print(f"Param {param_str} already has value {value_str}, returning gracefully")
             return 0, self.name, self.rs232Codes.NO_ERR.name
 
-        if param == self.tl.params_130.CHILD_LOCK_130.value:
-            data = 'on' if value else 'off'
+        if param_int == self.tl.params_130.CHILD_LOCK_130.value:
+            data = 'on' if value_int else 'off'
             self.print(f"Setting childLock data to: {data}")
-            response, name, err_code = self.set_child_lock(data)
+            _, _, err_code = self.set_child_lock(data)
             if err_code != self.rs232Codes.NO_ERR.name:
                 self.print("Got error from child lock")
                 return -1, self.name, err_code
 
-        elif param == self.tl.params_virtual.FLOOR_LOCK.value:
-            if value < 0 or value > 63:
-                self.print(f"Error: invalid value {value} to convert to floors to lock")
+        elif param_int == self.tl.params_virtual.FLOOR_LOCK.value:
+            if value_int < 0 or value_int > 63:
+                self.print(f"Error: invalid value {value_str} to convert to floors to lock")
                 return -1, self.name, self.rs232Codes.DATA_ERR.name
             fire_floor, error = self.tl.get_param(self.tl.params_readFile_param.FIRE_FLOOR.value)
             if error != self.rs232Codes.NO_ERR.name:
                 self.print("Error: Can not read fire floor")
                 return -1, self.name, error
-            bit_floors = []
-            total_number_of_floors = 6
+            bit_floors: list = []
+            total_number_of_floors: int = 6
             # loop backwards from 5 to 0 with range
             # transform value (int) to bit_floors (binary) for max number of floors (6)
             for bit in range(total_number_of_floors-1, -1, -1):
-                bit_floors.append((value >> bit) & 1)
+                bit_floors.append((value_int >> bit) & 1)
             self.print(f"Value in integer transformed to binary {bit_floors}")
 
-            locked_floor_data = []
+            locked_floor_data: list = []
             for floor in range(1, total_number_of_floors + 1):
                 if bit_floors[(total_number_of_floors) - floor] == 1:
                     locked_floor_data.append(floor)
@@ -1662,16 +1610,16 @@ class Rs232Handler:
                 return -1, self.name, err_code
 
             else:
-                response, name, err_code = self.set_floor_lock(str(locked_floor_data))
+                _, _, err_code = self.set_floor_lock(str(locked_floor_data))
                 if err_code != self.rs232Codes.NO_ERR.name:
                     self.print("Error: fault in floor lock")
                     return -1, self.name, err_code
 
-        elif param == self.tl.params_130.OIL_LEVEL_130.value:
-            if value < 0 or value > 100:
-                self.print(f"Error: invalid value {value} ")
+        elif param_int == self.tl.params_130.OIL_LEVEL_130.value:
+            if value_int < 0 or value_int > 100:
+                self.print(f"Error: invalid value {value_str} ")
                 return -1, self.name, self.rs232Codes.DATA_ERR.name
-            response, name, err_code = self.set_oil_level(str(value), current_val)
+            _, _, err_code = self.set_oil_level(value_str, current_val)
             if err_code != self.rs232Codes.NO_ERR.name:
                 self.print("Error: Failed to set oil level")
                 return -1, self.name, err_code
@@ -1681,13 +1629,13 @@ class Rs232Handler:
             # If we cannot read the param from the database, it has never been polled successfully and (probably) does
             # not exist. This means we cannot write to this if there has been no successful poll, but then lift_type is
             # 0 in CA anyway, and we won't be able to DDM write any param.
-            _, _, err_code = self.read_parameter_1k([str(param)])
+            _, _, err_code = self.read_parameter_1k([param_str])
             if err_code != self.rs232Codes.NO_ERR.name:
-                self.print(f"Error: Unable to read value of param {param}, it does not exist in db. Can't write to it!")
+                self.print(f"Error: Unable to read value of param {param_str}, it does not exist in db. Can't write to it!")
                 return -1, self.name, self.rs232Codes.WRITE_PARAM_NOT_SUPPORTED_BY_1K.name
 
             # Check what file the param we want to write is in
-            file = self.tl.get_file_for_param(param)
+            file: str = self.tl.get_file_for_param(param_int)
             if not file:
                 return -1,  self.name, self.rs232Codes.WRITE_PARAM_NOT_IN_FILES.name
 
@@ -1705,13 +1653,13 @@ class Rs232Handler:
             print(f"Data from readFile: {data}")
 
             # Replace the param
-            byte_size = self.tl.database[param].byte_size
-            value_in_bytes = value.to_bytes(byte_size, "little", signed=False)
+            byte_size: int = self.tl.database[param_int].byte_size
+            value_in_bytes: bytes = value_int.to_bytes(byte_size, "little", signed=False)
 
             for byte_number in range(byte_size):
-                print(f"We getting current value: {data[self.tl.database[param].byte_start + byte_number]}, "
+                print(f"We getting current value: {data[self.tl.database[param_int].byte_start + byte_number]}, "
                       f"we replacing with: {value_in_bytes[byte_number]}")
-                data[self.tl.database[param].byte_start + byte_number] = value_in_bytes[byte_number]
+                data[self.tl.database[param_int].byte_start + byte_number] = value_in_bytes[byte_number]
             print(f"New data, ready to ship to GW: {data}")
 
             # Write the file
@@ -1720,10 +1668,10 @@ class Rs232Handler:
                 self.print(f"Error: Error when writing new data to 1k through writeFile: {err}")
                 return -1, self.name, err
 
-        self.tl.database[param].value = str(value)
+        self.tl.database[param_int].value = value_str
         return 0, self.name, self.rs232Codes.NO_ERR.name
 
-    def get_operation_package(self, signal):
+    def get_operation_package(self, signal: str) -> tuple[Any, str, str]:
         """
         Read and return an operation package
         """
@@ -1753,11 +1701,11 @@ class Rs232Handler:
 
         return response, self.name, err_code
 
-    def __repackage_status(self, status):
+    def __repackage_status(self, status: list) -> tuple[Any, str]:
         """
         Return the latest notification/status response
         """
-        data_last = []
+        data_last: list = []
         if len(status) > 0:
             for pkg in status:
                 try:
@@ -1774,21 +1722,21 @@ class Rs232Handler:
             self.print("Received empty status.")
             return "", self.rs232Codes.STATUS_ERR.name
 
-    def check_if_above_or_equal_to_versions(self, versions):
+    def check_if_above_or_equal_to_versions(self, versions: list) -> bool:
         """
         Check if current version of U1 and U16 is above or equal to in arg version
         :param versions: What versions to compare to. List as [U1, U16] format "X.Y"
         :return: True if above or equal else False
         """
-        u1_main_installed = int(self.tl.database[self.tl.params_2.MAIN_VERSION_2.value].value)
-        u1_sub_installed = int(self.tl.database[self.tl.params_2.SUB_VERSION_2.value].value)
-        u16_main_installed = int(self.tl.database[self.tl.params_version.ARGATE_MAIN_VERSION.value].value)
-        u16_sub_installed = int(self.tl.database[self.tl.params_version.ARGATE_SUB_VERSION.value].value)
+        u1_main_installed: int = int(self.tl.database[self.tl.params_2.MAIN_VERSION_2.value].value)
+        u1_sub_installed: int = int(self.tl.database[self.tl.params_2.SUB_VERSION_2.value].value)
+        u16_main_installed: int = int(self.tl.database[self.tl.params_version.ARGATE_MAIN_VERSION.value].value)
+        u16_sub_installed: int = int(self.tl.database[self.tl.params_version.ARGATE_SUB_VERSION.value].value)
 
-        u1_main_required = int(versions[0].split(".")[0])
-        u1_sub_required = int(versions[0].split(".")[1])
-        u16_main_required = int(versions[1].split(".")[0])
-        u16_sub_required = int(versions[1].split(".")[1])
+        u1_main_required: int = int(versions[0].split(".")[0])
+        u1_sub_required: int = int(versions[0].split(".")[1])
+        u16_main_required: int = int(versions[1].split(".")[0])
+        u16_sub_required: int = int(versions[1].split(".")[1])
 
         if u1_main_required > u1_main_installed:
             return False
@@ -1804,7 +1752,7 @@ class Rs232Handler:
 
         return True
 
-def get_and_save_prod_loader_params():
+def get_and_save_prod_loader_params() -> str:
     """
     Read and store parameters used when ProdLoader has configured
     """
@@ -1839,7 +1787,7 @@ def get_and_save_prod_loader_params():
                 prodLoadParaValue[key], _, _ = rs232.read_parameter_1k([value])
                 print(prodLoadParaValue[key])
             elif key == "doubleDoors":
-                for double_key, double_value in prodLoadParaValue[key].items():
+                for _, double_value in prodLoadParaValue[key].items():
                     param_value, _, _ = rs232.read_parameter_1k([double_value])
                     double_doors_value.append(param_value)
                 prodLoadParaValue[key] = double_doors_value
@@ -1882,10 +1830,7 @@ if __name__ == "__main__":
             sys.exit(1)
 
         write_enc = input.encode('utf-8')
-        if obj.digisign_simulator:
-            obj.client.sendto(write_enc, obj.server_address_port)
-        else:
-            obj.client.write(write_enc)
+        obj.client.write(write_enc)
 
         while 1:
             resp_status, resp_wanted, resp_other, err_code = obj.get_signal_from_serial_buffer('operation', '130')
