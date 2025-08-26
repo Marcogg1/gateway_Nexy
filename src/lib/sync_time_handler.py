@@ -2,14 +2,15 @@
 
 import os
 import sys
-from datetime import datetime, timezone
+import time
 from math import ceil
 from typing import Type, Any
+from datetime import datetime, timezone
 
 path_to_source = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 sys.path.append(path_to_source)
 
-from lib.error_signals import SyncTimeCode, MbCode
+from lib.error_signals import SyncTimeCode, MbCode, Rs232Code
 
 
 class SyncTimeHandler:
@@ -21,24 +22,37 @@ class SyncTimeHandler:
         self.name: str = self.SyncTimeCode.SOURCE.value
         self.print = print
 
-    # TODO: EG-14, good luck
-#    def sync_time_rs232(self, time_value: str) -> int:
-#        try:
-#            time_value = int(time_value)
-#        except ValueError as error:
-#            self.print(error)
-#            self.print("Error: Time value '{}' in signal is not a number".format(time_value))
-#            return self.__handle_return(self.SyncTimeCode.ARG_TYPE_ERR)
+    def sync_time_rs232(self, epoch_time: str, rs232_handler: Any) -> tuple[Any, str, str]:
+        try:
+            int(epoch_time)
+        except ValueError as e:
+            self.print(f"Error: inserted epoch_time '{epoch_time}' is not an int.")
+            self.print(e)
+            return -1, self.name, self.SyncTimeCode.ARG_TYPE_ERR.name
 
-#        if time_value == -1:
-#            timestamp = self.__get_utc_time()
-#        else:
-#            self.print("Error: Invalid time value in signal")
-#            return self.__handle_return(self.SyncTimeCode.ARG_INVALID_ERR)
+        if epoch_time == '-1':
+            epoch_time = self.__get_utc_time()
+            self.print(f"Got time -1, setting UTC_time:{epoch_time}")
 
-#        return timestamp
+        _, _, _, _, err_code = rs232_handler.write_serial(["time", epoch_time])
+        if err_code != Rs232Code.NO_ERR.name:
+            self.print(f"Error: failed to write time read request to the serial bus.")
+            return -1, self.name, err_code
 
-    def sync_time(self, time_value_str: str, modbus_handler: Any) -> tuple[str, Any]:
+        time.sleep(rs232_handler.serial_timeout)
+        _, resp_wanted, _, err_code = rs232_handler.get_signal_from_serial_buffer('time')
+        response = resp_wanted[0]['updated']
+
+        if err_code != SyncTimeCode.NO_ERR.name:
+            self.print("Error: Failed to get time read response from serial buffer.")
+            return -1, self.name, err_code
+
+        if response == 'false':
+            err_code = SyncTimeCode.EPOCH_TIME_ERR.name
+
+        return response, self.name, err_code
+
+    def sync_time(self, time_value_str: str, modbus_handler: Any) -> tuple[str, str]:
         try:
             time_value_int: int = int(time_value_str)
         except ValueError as error:
@@ -57,7 +71,7 @@ class SyncTimeHandler:
 
         return self.__update_parameter(modbus_handler, timestamp)
 
-    def __update_parameter(self, modbus_handler: Any, timestamp: int) -> tuple[str, Any]:
+    def __update_parameter(self, modbus_handler: Any, timestamp: int) -> tuple[str, str]:
         if not modbus_handler:
             self.print("Error: No valid Modbus Handler object provided")
             return self.name, self.SyncTimeCode.ARG_MODBUS_ERR.name
@@ -71,7 +85,7 @@ class SyncTimeHandler:
 
         return self.__handle_modbus_response(modbus_response)
 
-    def __handle_modbus_response(self, modbus_response: Any) -> tuple[str, Any]:
+    def __handle_modbus_response(self, modbus_response: Any) -> tuple[str, str]:
         expected_response_length: int = 3
         actual_response_length: int = 0
         if modbus_response:

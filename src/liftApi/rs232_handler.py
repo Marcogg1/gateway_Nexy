@@ -72,9 +72,9 @@ class Rs232Handler:
             return False
         return True
 
-    def handle_sync_time_request(self, time_value):
+    def handle_sync_time_request(self, time_value_list):
         sync_time_handler = SyncTimeHandler()
-        return sync_time_handler.sync_time_rs232(time_value=time_value)
+        return sync_time_handler.sync_time_rs232(time_value_list[0], self)
 
     def __validate_input_filetype(self, args: list, args_len: int) -> str:
         if not isinstance(args, list) or len(args) != args_len:
@@ -717,40 +717,6 @@ class Rs232Handler:
 
         # Response must be in format <list>
         response: list = [resp_wanted[0]['data']]
-        return response, self.name, err_code
-
-    def set_RTC(self, args: list) -> tuple[Any, str, str]:
-        """
-        Set the RTC timer
-        :param epoch_time: The epoch time to set the RTC to.
-        """
-        epoch_time: str = args[0]
-        try:
-            int(epoch_time)
-        except ValueError as e:
-            self.print("Error: inserted epoch_time '{epoch_time}' is not an int.")
-            self.print(e)
-            return -1, self.name, self.rs232Codes.ARG_TYPE_ERR.name
-        if epoch_time == '-1':
-            epoch_time = str(self.handle_sync_time_request(epoch_time))
-            self.print(f"Got time -1, setting UTC_time:{epoch_time}")
-
-        _, _, _, _, err_code = self.write_serial(["time", epoch_time])
-        if err_code != self.rs232Codes.NO_ERR.name:
-            self.print(f"Error: failed to write time read request to the serial bus.")
-            return -1, self.name, err_code
-
-        time.sleep(self.serial_timeout)  # Previous timeout = 0.5
-        _, resp_wanted, _, err_code = self.get_signal_from_serial_buffer('time')
-        response: str = resp_wanted[0]['updated']
-
-        if err_code != self.rs232Codes.NO_ERR.name:
-            self.print("Error: Failed to get time read response from serial buffer.")
-            return -1, self.name, err_code
-
-        if response == 'false':
-            err_code = self.rs232Codes.EPOCH_TIME_ERR.name
-
         return response, self.name, err_code
 
     def get_ar_version(self) -> tuple[Any, str, str]:

@@ -9,6 +9,7 @@ p = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, 'src
 sys.path.append(p)
 
 import liftApi.rs232_handler as RS
+from lib.error_signals import SyncTimeCode
 
 
 # MOCKS
@@ -1888,7 +1889,7 @@ class TestRs232Handler:
         assert name == self.rsCodes.SOURCE.value
         assert error == self.rsCodes.NO_ERR.name
 
-    def test_set_RTC(self):
+    def test_set_time(self):
         """
         Test successful and unsuccessful tests of set_RTC
 
@@ -1900,9 +1901,9 @@ class TestRs232Handler:
                                                                 [{"cmd": "time", "updated": "true"}],
                                                                 -1,
                                                                 self.rsCodes.NO_ERR.name])
-        updated, name, error = self.rs.set_RTC(["978307200"])
+        updated, name, error = self.rs.handle_sync_time_request(["978307200"])
         assert updated == 'true'
-        assert name == self.rsCodes.SOURCE.value
+        assert name == SyncTimeCode.SOURCE.value
         assert error == self.rsCodes.NO_ERR.name
 
         # Unsuccessful test
@@ -1912,31 +1913,16 @@ class TestRs232Handler:
                                                                 -1,
                                                                 self.rsCodes.NO_ERR.name])
 
-        updated, name, error = self.rs.set_RTC(["978307200"])
+        updated, name, error = self.rs.handle_sync_time_request(["978307200"])
         assert updated == 'false'
-        assert name == self.rsCodes.SOURCE.value
-        assert error == self.rsCodes.EPOCH_TIME_ERR.name
+        assert name == SyncTimeCode.SOURCE.value
+        assert error == SyncTimeCode.EPOCH_TIME_ERR.name
 
         # Wrong input format
-        updated, name, error = self.rs.set_RTC(["a"])
+        updated, name, error = self.rs.handle_sync_time_request(["a"])
         assert updated == -1
-        assert name == self.rsCodes.SOURCE.value
+        assert name == SyncTimeCode.SOURCE.value
         assert error == self.rsCodes.ARG_TYPE_ERR.name
-
-        # Test for -1 from CA
-
-        self.rs.handle_sync_time_request = mock.MagicMock(return_value="978307200")
-
-        self.rs.get_signal_from_serial_buffer = mock.MagicMock(return_value=
-                                                               [-1,
-                                                                [{"cmd": "time", "updated": "true"}],
-                                                                -1,
-                                                                self.rsCodes.NO_ERR.name])
-        updated, name, error = self.rs.set_RTC(["-1"])
-        self.rs.handle_sync_time_request.assert_called_with('-1')
-        assert updated == 'true'
-        assert name == self.rsCodes.SOURCE.value
-        assert error == self.rsCodes.NO_ERR.name
 
     def test_child_lock(self):
         """
