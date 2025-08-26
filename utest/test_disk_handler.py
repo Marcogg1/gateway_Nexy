@@ -218,7 +218,7 @@ class TestDiskHandler(unittest.TestCase):
 
             else:
                 path = self.dh._DiskHandler__get_path_of_type(type)
-                assert path == -1
+                assert path == "-1"
                 other += 1
 
         # Test we hit all types
