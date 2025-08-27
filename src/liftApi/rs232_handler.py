@@ -515,8 +515,8 @@ class Rs232Handler:
         i: int = 0
         while i < retries:
             try:
-                if self.client.in_waiting > 0:
-                    waiting_bytes = self.client.in_waiting
+                if self.client.in_waiting() > 0:
+                    waiting_bytes = self.client.in_waiting()
                     rsp += self.client.read(size=waiting_bytes).decode('utf-8')
             except serial.SerialException as error:
                 self.print("Error: Serial read exception")
@@ -1801,6 +1801,3 @@ if __name__ == "__main__":
             resp_status, resp_wanted, resp_other, err_code = obj.get_signal_from_serial_buffer('operation', '130')
             response = resp_status + resp_wanted + resp_other
             obj.print(response)
-
-
-
