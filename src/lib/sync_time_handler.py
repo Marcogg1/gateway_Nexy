@@ -31,7 +31,7 @@ class SyncTimeHandler:
             return -1, self.name, self.SyncTimeCode.ARG_TYPE_ERR.name
 
         if epoch_time == '-1':
-            epoch_time = self.__get_utc_time()
+            epoch_time = str(self.__get_utc_time())
             self.print(f"Got time -1, setting UTC_time:{epoch_time}")
 
         _, _, _, _, err_code = rs232_handler.write_serial(["time", epoch_time])

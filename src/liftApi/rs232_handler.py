@@ -26,7 +26,6 @@ class Rs232Handler:
         self.print = print  # TODO: Remove
         self.dh = DiskHandler()
         self.rs_port: str = "/dev/ttymxc1"
-        self.client = None
         self.data_sep: str = 'x'
         self.serial_timeout: float = 0.5
         self.polled_file_package: int = 0
@@ -47,10 +46,10 @@ class Rs232Handler:
         self.doorOpenCount_version_limits: list = ["4.7", "1.2"]
         self.logfile_length_version_limits: list = ["4.7", "1.3"]
 
-        self.tl: type[ThousandLib] = ThousandLib()
+        self.tl: ThousandLib = ThousandLib()
 
         try:
-            self.client = serial.Serial(port=self.rs_port,
+            self.client: serial.Serial = serial.Serial(port=self.rs_port,
                                         baudrate=38400,
                                         parity=serial.PARITY_NONE,
                                         stopbits=serial.STOPBITS_ONE,
@@ -72,8 +71,8 @@ class Rs232Handler:
             return False
         return True
 
-    def handle_sync_time_request(self, time_value_list):
-        sync_time_handler = SyncTimeHandler()
+    def handle_sync_time_request(self, time_value_list: list) -> tuple[Any, str, str]:
+        sync_time_handler: SyncTimeHandler = SyncTimeHandler()
         return sync_time_handler.sync_time_rs232(time_value_list[0], self)
 
     def __validate_input_filetype(self, args: list, args_len: int) -> str:
@@ -516,8 +515,8 @@ class Rs232Handler:
         i: int = 0
         while i < retries:
             try:
-                if self.client.inWaiting() > 0:
-                    waiting_bytes = self.client.inWaiting()
+                if self.client.in_waiting > 0:
+                    waiting_bytes = self.client.in_waiting
                     rsp += self.client.read(size=waiting_bytes).decode('utf-8')
             except serial.SerialException as error:
                 self.print("Error: Serial read exception")
@@ -1718,11 +1717,12 @@ class Rs232Handler:
 
         return True
 
-def get_and_save_prod_loader_params() -> str:
+def get_and_save_prod_loader_params() -> Any:
     """
     Read and store parameters used when ProdLoader has configured
     """
-    prodLoadParaNo = {"liftRef1": "0",
+    prodLoadParaNo: dict[str, Any] = {
+                      "liftRef1": "0",
                       "liftRef2": "1",
                       "freqControl": "112",
                       "lock": "114",
@@ -1739,11 +1739,11 @@ def get_and_save_prod_loader_params() -> str:
                       "aGateU16": "124",
                       "emergencyLightTest": "125"}
 
-    prodLoadParaValue = prodLoadParaNo
-    double_doors_value = []
+    prodLoadParaValue: dict[str, Any] = prodLoadParaNo
+    double_doors_value: list = []
 
-    rs232 = Rs232Handler()
-    arg_in = ['1']
+    rs232: Rs232Handler = Rs232Handler()
+    arg_in: list = ['1']
     res, _, err_code = rs232.poll_lift(arg_in)
 
     if (err_code == rs232.rs232Codes.NO_ERR.name) or (err_code == rs232.rs232Codes.PARTIAL_ERR.name):
@@ -1773,8 +1773,8 @@ def get_and_save_prod_loader_params() -> str:
 
 if __name__ == "__main__":
 
-    obj = Rs232Handler()
-    input = sys.argv[1]
+    obj: Rs232Handler = Rs232Handler()
+    input: str = sys.argv[1]
     obj.print(input)
     if (input == "production_test"):
         rsp = get_and_save_prod_loader_params()
@@ -1786,7 +1786,7 @@ if __name__ == "__main__":
             sys.exit(0)
     else:
         try:
-            input_json = json.loads(input)
+            input_json: Any = json.loads(input)
         except json.decoder.JSONDecodeError as e:
             print("Failed to parse input as json. Did you escape the quotation marks and comma signs?")
             sys.exit(1)
@@ -1795,8 +1795,7 @@ if __name__ == "__main__":
             print("Error: Input not json format")
             sys.exit(1)
 
-        write_enc = input.encode('utf-8')
-        obj.client.write(write_enc)
+        obj.client.write(input.encode('utf-8'))
 
         while 1:
             resp_status, resp_wanted, resp_other, err_code = obj.get_signal_from_serial_buffer('operation', '130')
