@@ -171,6 +171,7 @@ class ThousandLib:
 
         changed_signals: list = []
         err_code: str = self.rs232Codes.NO_ERR.name
+        new_val = '-1'
 
         for signal in self.params_virtual:
             if signal.value == self.params_virtual.BATTERY_STATE_130.value:

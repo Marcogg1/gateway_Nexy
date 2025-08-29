@@ -1,6 +1,8 @@
 pytest
 pytest-subtests
 pytest-cov
+pylint
 mypy
 mock
+types-mock
 freezegun

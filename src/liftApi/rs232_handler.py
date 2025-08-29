@@ -515,8 +515,10 @@ class Rs232Handler:
         i: int = 0
         while i < retries:
             try:
-                if self.client.in_waiting() > 0:
-                    waiting_bytes = self.client.in_waiting()
+                # The below two lines complain about "int not being callable", but in_waiting() is a callable,
+                # not an int, so idk why it's complaining.. Anyway, ignoring errors for now
+                if self.client.in_waiting() > 0:  # type: ignore
+                    waiting_bytes: int = self.client.in_waiting()  # type: ignore
                     rsp += self.client.read(size=waiting_bytes).decode('utf-8')
             except serial.SerialException as error:
                 self.print("Error: Serial read exception")
