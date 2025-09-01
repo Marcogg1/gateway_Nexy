@@ -45,7 +45,7 @@ def lint_check():
                        cwd=path_to_root,
                        stderr=subprocess.STDOUT)
 
-        command = f"python -m pylint --rcfile=.pylintrc --errors-only utils/"
+        command = "python -m pylint --rcfile=.pylintrc --errors-only utils/"
         subprocess.run(command.split(),
                        timeout=90,
                        check=True,
@@ -140,11 +140,13 @@ def docker_build_check():
 
 def print_help():
     print(__file__ + " <options, if no args syntax/lint check and unittests are run>\n")
+    print("-a --lint\t\tEnable annotations check")
     print("-x --syntax\t\tEnable syntax check")
     print("-l --lint\t\tEnable lint check")
     print("-u --unittests\t\tEnable unittests")
     print("-s --systemtests\tEnable systemtests")
-    print("-d --docker\tEnable docker build test")
+    print("-ds --docker\tEnable docker syntax test")
+    print("-db --docker\tEnable docker build test")
     print("-h --help\t\tThis help")
 
 

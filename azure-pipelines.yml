@@ -1,0 +1,17 @@
+pool:
+  vmImage: windows-latest
+
+jobs:
+- job: Delivery check
+  timeoutInMinutes: 20
+  steps:
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: '3.13'
+
+  - task: PythonScript@0
+    inputs:
+      scriptSource: 'filePath'
+      scriptPath: 'utils/delivery_check.py'
+      scriptPath: '$(Build.SourcesDirectory)/utils'
+      arguments: '-a -x -l -u'
