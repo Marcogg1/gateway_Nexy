@@ -37,15 +37,13 @@ def lint_check():
     print("Lint check...")
     stderr = ""
     try:
-        command = "python -m pylint --errors-only --ignore=config src/"
-        subprocess.run(command.split(),
+        subprocess.run(["python", "-m", "pylint", "--errors-only", "--ignore=config", "src/"],
                        timeout=90,
                        check=True,
                        cwd=path_to_root,
                        stderr=subprocess.STDOUT)
 
-        command = "python -m pylint --rcfile=.pylintrc --errors-only utils/"
-        subprocess.run(command.split(),
+        subprocess.run(["python", "-m", "pylint", "--rcfile=.pylintrc", "--errors-only", "utils/"],
                        timeout=90,
                        check=True,
                        cwd=path_to_root,
