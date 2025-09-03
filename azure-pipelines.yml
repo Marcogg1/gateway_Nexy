@@ -9,9 +9,13 @@ jobs:
     inputs:
       versionSpec: '3.13'
 
+  - script: |
+      python -m pip install --upgrade pip
+      pip install -r requirements_host.txt
+    displayName: 'Install dependencies'
+
   - task: PythonScript@0
     inputs:
       scriptSource: 'filePath'
       scriptPath: 'utils/delivery_check.py'
-      scriptPath: '$(Build.SourcesDirectory)/utils'
       arguments: '-a -x -l -u'
