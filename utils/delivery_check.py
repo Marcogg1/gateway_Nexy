@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import subprocess
-import shutil
 import sys
 import os
 

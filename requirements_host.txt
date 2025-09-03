@@ -5,4 +5,5 @@ pylint
 mypy
 mock
 types-mock
+types-pyserial
 freezegun
