@@ -2,7 +2,7 @@ pool:
   vmImage: windows-latest
 
 jobs:
-- job: Delivery check
+- job: DeliveryCheck
   timeoutInMinutes: 20
   steps:
   - task: UsePythonVersion@0
