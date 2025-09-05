@@ -136,14 +136,14 @@ def docker_build_check():
     print("OK\n")
 
 def print_help():
-    print(__file__ + " <options, if no args syntax/lint check and unittests are run>\n")
-    print("-a --lint\t\tEnable annotations check")
+    print(__file__ + " <options, if no args syntax/lint/annotations/docker check and unittests are run>\n")
+    print("-a --annotations\tEnable annotations check")
     print("-x --syntax\t\tEnable syntax check")
     print("-l --lint\t\tEnable lint check")
     print("-u --unittests\t\tEnable unittests")
     print("-s --systemtests\tEnable systemtests")
-    print("-ds --docker\tEnable docker syntax test")
-    print("-db --docker\tEnable docker build test")
+    print("-ds --docker-syntax\tEnable docker syntax test")
+    print("-db --docker-build\tEnable docker build test")
     print("-h --help\t\tThis help")
 
 
@@ -159,7 +159,6 @@ if __name__ == '__main__':
     if len(sys.argv) == 1:
         # Default
         run_docker_syntax = True
-        run_docker_build = True
         run_mypy = True
         run_syntax = True
         run_lint = True
