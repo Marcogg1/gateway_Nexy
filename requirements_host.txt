@@ -8,3 +8,4 @@ mock
 types-mock
 types-pyserial
 freezegun
+azure-iot-device
