@@ -70,7 +70,7 @@ async def register_device() -> None:
 
     # Values can be "unassigned", "assigning", "assigned", "failed", "disabled"
     print(f"status: {register_result.status}")
-    if register_result.status == "assigned" and register_result.registration_state is not None:
+    if register_result.status == "assigned" and register_result.registration_state:
         print(f"Assigned: {register_result.status}")
 
         iot_hub_url: str = register_result.registration_state.assigned_hub
@@ -93,7 +93,7 @@ async def register_device() -> None:
         print(e)    
         print("IoT Hub init failed")   
 
-    if iot_device_client is not None:
+    if iot_device_client:
         await iot_device_client.connect()
         print("Device connected to IoT Hub")
         iot_device_client.on_method_request_received = method_request_handler
