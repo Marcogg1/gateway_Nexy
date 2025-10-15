@@ -42,10 +42,10 @@ async def method_request_handler(method_request: MethodRequest) -> None:
     method_response: MethodResponse = MethodResponse.create_from_method_request(
         method_request=method_request, status=status, payload=response_payload
     )
-    if iot_device_client is not None:
+    if iot_device_client:
         await iot_device_client.send_method_response(method_response)
     else:
-        print("Error: iot_device_client is None, cannot send method response.")
+        print("Error: iot_device_client is faulty, cannot send method response.")
 
 
 async def register_device() -> None:
