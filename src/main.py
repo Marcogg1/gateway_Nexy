@@ -2,6 +2,7 @@ import asyncio
 from cloudApi.dps_client import DPSClient 
 from cloudApi.device_client import DeviceClientFactory
 from cloudApi.method_request_handler import MethodRequestHandler
+from azure.iot.device.aio import IoTHubDeviceClient
 
 async def main():
     print("Starting main")
@@ -13,7 +14,6 @@ async def main():
     except Exception as e:
         print(f"Provisioning failed: {e}")
         return
-       
 
     #Create device client
     try:
@@ -35,7 +35,7 @@ async def main():
 
     #Run in parallel
     await asyncio.gather(
-        method_handler.listen_for_method(None)
+        method_handler.listen_for_method(method_handler)
     )
 
     await asyncio.sleep(1)  # Keep the main thread alive to allow background tasks to run
