@@ -35,10 +35,8 @@ async def main():
 
     #Run in parallel
     await asyncio.gather(
-        method_handler.listen_for_method(method_handler)
+        method_handler.listen_for_method()
     )
-
-    await asyncio.sleep(1)  # Keep the main thread alive to allow background tasks to run
 
 
 if __name__ == "__main__":

@@ -7,7 +7,7 @@ class MethodRequestHandler:
     def __init__(self, device_client: IoTHubDeviceClient) -> None:
         self.device_client = device_client  
 
-    async def listen_for_method(self, method_request: MethodRequest) -> None:
+    async def listen_for_method(self) -> None:
         while True:
             method_request = await self.device_client.receive_method_request()
             print(f"Received method request: {method_request.name}")
