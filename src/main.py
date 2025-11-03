@@ -2,7 +2,10 @@ import asyncio
 from cloudApi.dps_client import DPSClient 
 from cloudApi.device_client import DeviceClientFactory
 from cloudApi.method_request_handler import MethodRequestHandler
+from cloudApi.device_twin_reported import DeviceTwinReporter
 from azure.iot.device.aio import IoTHubDeviceClient
+from liftApi.lift_simulator import LiftSimulator
+
 
 async def main():
     print("Starting main")
@@ -28,14 +31,17 @@ async def main():
     #Init handlers
     try:
         method_handler = MethodRequestHandler(device_client)
+        reporter = DeviceTwinReporter(device_client)
+        liftSim = LiftSimulator(reporter)
     except Exception as e:
         print(f"Handler initialization failed: {e}")
         return
-    
 
     #Run in parallel
     await asyncio.gather(
-        method_handler.listen_for_method()
+        method_handler.listen_for_method(),
+        liftSim.report_temperature_loop(),
+        liftSim.simulate_lift_operation()
     )
 
 
