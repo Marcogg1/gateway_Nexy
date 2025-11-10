@@ -4,6 +4,7 @@ from cloudApi.device_client import DeviceClientFactory
 from cloudApi.method_request_handler import MethodRequestHandler
 from cloudApi.device_twin_reported import DeviceTwinReporter
 from azure.iot.device.aio import IoTHubDeviceClient
+from cloudApi.device_twin_desired_handler import DeviceTwinDesiredHandler    
 from liftApi.lift_simulator import LiftSimulator
 
 
@@ -28,11 +29,13 @@ async def main():
         print(f"Device client creation/connect failed: {e}")
         return
     
+    
     #Init handlers
     try:
         method_handler = MethodRequestHandler(device_client)
         reporter = DeviceTwinReporter(device_client)
-        liftSim = LiftSimulator(reporter)
+        liftSim = LiftSimulator(reporter) # Init lift simulator, used for testing device twin reporting. Remove when not needed
+        desired_handler = await DeviceTwinDesiredHandler.create(device_client)   
     except Exception as e:
         print(f"Handler initialization failed: {e}")
         return
@@ -40,8 +43,9 @@ async def main():
     #Run in parallel
     await asyncio.gather(
         method_handler.listen_for_method(),
-        liftSim.report_temperature_loop(),
-        liftSim.simulate_lift_operation()
+        desired_handler.listen_for_desired_updates(),
+        liftSim.report_temperature_loop(), # Start temperature reporting loop testing. Remove when not needed
+        liftSim.simulate_lift_operation() # Simulate lift reporting, add properties. Remove when not needed
     )
 
 

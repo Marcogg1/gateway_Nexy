@@ -1,3 +1,9 @@
+'''
+testing device twin properties.reporting from lift simulator
+simuate_lift_operation is report two properties to device_twin->reporting
+report_temperature_loop is reporting temperature every minute and setting the result on device_twin->reporting
+'''
+
 from cloudApi.device_twin_reported import DeviceTwinReporter
 import random
 import asyncio
