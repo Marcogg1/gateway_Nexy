@@ -1,4 +1,4 @@
 pymodbus
 pyserial
 azure-iot-device
-azure-storage-blob
+azure-storage-blob>=12.20.0  # Requires version with py.typed marker for mypy
