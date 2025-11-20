@@ -1,3 +1,4 @@
 pymodbus
 pyserial
 azure-iot-device
+azure-storage-blob
