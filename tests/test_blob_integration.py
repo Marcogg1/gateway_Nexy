@@ -35,59 +35,70 @@ async def main():
     """Run blob upload integration test."""
     device_client = None
 
-    try:
-        logger.info("=" * 60)
-        logger.info("BLOB UPLOAD INTEGRATION TEST")
-        logger.info("=" * 60)
+    logger.info("=" * 60)
+    logger.info("BLOB UPLOAD INTEGRATION TEST")
+    logger.info("=" * 60)
 
-        # Step 1: Provision device
-        logger.info("Step 1: Provisioning device...")
+    # Step 1: Provision device
+    logger.info("Step 1: Provisioning device...")
+    try:
         dps = DPSClient()
         registration_result = await dps.create_provisioning_device()
-        logger.info(f"Device provisioned to hub: {registration_result.registration_state.assigned_hub}")
+    except Exception as e:
+        logger.error(f"Device provisioning failed: {e}", exc_info=True)
+        return 1
+    logger.info(f"Device provisioned to hub: {registration_result.registration_state.assigned_hub}")
 
-        # Step 2: Create device client
-        logger.info("Step 2: Creating device client...")
+    # Step 2: Create device client
+    logger.info("Step 2: Creating device client...")
+    try:
         factory = DeviceClientFactory(registration_result)
         device_client = factory.create_client()
-
-        # Step 3: Connect
-        logger.info("Step 3: Connecting to IoT Hub...")
-        await device_client.connect()
-        logger.info("Connected successfully!")
-
-        # Step 4: Create test data
-        logger.info("Step 4: Creating test data...")
-        test_data = f"Blob upload test from GatewayApp\nTimestamp: {asyncio.get_event_loop().time()}\n".encode('utf-8')
-        blob_name = f"test_upload_{Config.DEVICE_NAME}.txt"
-        logger.info(f"Blob name: {blob_name}")
-        logger.info(f"Data size: {len(test_data)} bytes")
-
-        # Step 5: Upload to blob
-        logger.info("Step 5: Uploading to blob storage...")
-        await upload_to_blob(device_client, blob_name, test_data)
-
-        logger.info("=" * 60)
-        logger.info("TEST COMPLETED SUCCESSFULLY!")
-        logger.info("=" * 60)
-        logger.info("")
-        logger.info("Next steps:")
-        logger.info("1. Check IoT Hub device messages in Azure Portal")
-        logger.info("2. Check blob storage container for the uploaded file")
-        logger.info(f"   - Blob name: {blob_name}")
-        logger.info("")
-
-        return 0
-
     except Exception as e:
-        logger.error(f"Test failed: {e}", exc_info=True)
+        logger.error(f"Device client creation failed: {e}", exc_info=True)
         return 1
 
-    finally:
-        if device_client:
-            logger.info("Disconnecting...")
-            await device_client.disconnect()
-            logger.info("Disconnected.")
+    # Step 3: Connect to IoT Hub
+    logger.info("Step 3: Connecting to IoT Hub...")
+    try:
+        await device_client.connect()
+    except Exception as e:
+        logger.error(f"IoT Hub connection failed: {e}", exc_info=True)
+        return 1
+    logger.info("Connected successfully!")
+
+    # Step 4: Create test data
+    logger.info("Step 4: Creating test data...")
+    test_data = f"Blob upload test from GatewayApp\nTimestamp: {asyncio.get_event_loop().time()}\n".encode('utf-8')
+    blob_name = f"test_upload_{Config.DEVICE_NAME}.txt"
+    logger.info(f"Blob name: {blob_name}")
+    logger.info(f"Data size: {len(test_data)} bytes")
+
+    # Step 5: Upload to blob
+    logger.info("Step 5: Uploading to blob storage...")
+    try:
+        await upload_to_blob(device_client, blob_name, test_data)
+    except Exception as e:
+        logger.error(f"Blob upload failed: {e}", exc_info=True)
+        await device_client.disconnect()
+        return 1
+
+    logger.info("=" * 60)
+    logger.info("TEST COMPLETED SUCCESSFULLY!")
+    logger.info("=" * 60)
+    logger.info("")
+    logger.info("Next steps:")
+    logger.info("1. Check IoT Hub device messages in Azure Portal")
+    logger.info("2. Check blob storage container for the uploaded file")
+    logger.info(f"   - Blob name: {blob_name}")
+    logger.info("")
+
+    # Cleanup
+    logger.info("Disconnecting...")
+    await device_client.disconnect()
+    logger.info("Disconnected.")
+
+    return 0
 
 
 if __name__ == '__main__':
