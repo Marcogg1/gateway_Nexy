@@ -4,7 +4,22 @@ from config import Config
 
 
 class DPSClient:
+    """
+    Class for handling Device Provisioning Service (DPS) operations.
+    
+    Methods:
+        create_provisioning_device() -> RegistrationResult:
+        
+    Returns:
+    """
+
     def __init__(self) -> None:
+        """
+        Initialize the DPSClient with X.509 certificate details.
+        
+        Args:
+            None
+        """
         self.x509 = X509(
             cert_file=Config.TT_CERT, 
             key_file=Config.TT_KEY,
@@ -12,6 +27,15 @@ class DPSClient:
         )
 
     async def create_provisioning_device(self) -> RegistrationResult:
+        """
+        Asynchronously create and register a provisioning device using X.509 certificates.
+
+        Args:
+            None
+
+        Returns:
+            RegistrationResult: The result of the device registration process.
+        """
         provisioning_client = ProvisioningDeviceClient.create_from_x509_certificate(
             provisioning_host=Config.PROVISIONING_HOST,
             registration_id=Config.DEVICE_NAME,

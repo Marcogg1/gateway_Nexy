@@ -3,12 +3,17 @@ from cloudApi.dps_client import DPSClient
 from cloudApi.device_client import DeviceClientFactory
 from cloudApi.method_request_handler import MethodRequestHandler
 from cloudApi.device_twin_reported import DeviceTwinReporter
+from cloudApi.event_sender import EventSender
 from azure.iot.device.aio import IoTHubDeviceClient
 from cloudApi.device_twin_desired_handler import DeviceTwinDesiredHandler    
 from liftApi.lift_simulator import LiftSimulator
 
 
 async def main():
+    """
+     Main asynchronous function to initialize and run the IoT device client.
+    """
+    
     print("Starting main")
 
     #Provisioning device client
@@ -34,8 +39,9 @@ async def main():
     try:
         method_handler = MethodRequestHandler(device_client)
         reporter = DeviceTwinReporter(device_client)
-        liftSim = LiftSimulator(reporter) # Init lift simulator, used for testing device twin reporting. Remove when not needed
-        desired_handler = await DeviceTwinDesiredHandler.create(device_client)   
+        send_event = EventSender(device_client)
+        liftSim = LiftSimulator(reporter, send_event) # Init lift simulator, used for testing device twin reporting. Remove when not needed
+        desired_handler = await DeviceTwinDesiredHandler.create(device_client)
     except Exception as e:
         print(f"Handler initialization failed: {e}")
         return
@@ -45,7 +51,8 @@ async def main():
         method_handler.listen_for_method(),
         desired_handler.listen_for_desired_updates(),
         liftSim.report_temperature_loop(), # Start temperature reporting loop testing. Remove when not needed
-        liftSim.simulate_lift_operation() # Simulate lift reporting, add properties. Remove when not needed
+        liftSim.simulate_lift_operation(), # Simulate lift reporting, add properties. Remove when not needed
+        liftSim.send_parameter_data() # Simulate telemetry data sending. Remove when not needed
     )
 
 

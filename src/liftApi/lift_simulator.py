@@ -5,12 +5,17 @@ report_temperature_loop is reporting temperature every minute and setting the re
 '''
 
 from cloudApi.device_twin_reported import DeviceTwinReporter
+from cloudApi.event_sender import EventSender
 import random
 import asyncio
+import json
+import time
+from azure.iot.device import Message
 
 class LiftSimulator:
-    def __init__(self, reporter: DeviceTwinReporter) -> None:
+    def __init__(self, reporter: DeviceTwinReporter, event_sender: EventSender | None = None) -> None:
         self.reporter = reporter
+        self.event_sender = event_sender
 
     async def simulate_lift_operation(self):
         # Simulate lift operations and report relevant properties
@@ -26,3 +31,30 @@ class LiftSimulator:
             await self.reporter.report_property("temperature", temperature)
             print(f"Reported temperature: {temperature}°C")
             await asyncio.sleep(60)  # Vänta 1 minut
+
+    async def send_parameter_data(self):
+        while True:
+            parameter = random.randint(1,100)
+            parameter_value = random.randint(1,1000)
+            ts = str(int(time.time()))
+            payload = {
+                "data": [
+                    {
+                        "timestamp": ts,
+                        "value": parameter_value,
+                        "parameter": parameter
+                    }
+                ],
+                "error":"",
+                "event": "la.parameters.update",
+                "source": "la.parameter.polling"
+                }
+            
+            #return payload
+            await asyncio.sleep(5)  # Vänta 5 sekunder mellan sändningar
+
+            if self.event_sender:
+                await self.event_sender.send_event(payload)
+            else:
+                print("EventSender not configured; skipping send")
+
