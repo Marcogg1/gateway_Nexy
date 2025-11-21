@@ -24,6 +24,7 @@ async def upload_to_blob(
         blob_name: Name for the blob in Azure Storage.
         data: File content as bytes.
     """
+    # Try to upload the blob
     try:
         # Get storage info from IoT Hub
         storage_info = await device_client.get_storage_info_for_blob(blob_name)
@@ -40,14 +41,6 @@ async def upload_to_blob(
         blob_client = BlobClient.from_blob_url(blob_url)
         blob_client.upload_blob(data, overwrite=True)
 
-        # Notify IoT Hub of success
-        await device_client.notify_blob_upload_status(
-            storage_info['correlationId'],
-            True,
-            200,
-            "OK"
-        )
-
         logger.info(f"Uploaded {len(data)} bytes to {blob_name}")
 
     except Exception as e:
@@ -55,12 +48,24 @@ async def upload_to_blob(
 
         # Try to notify IoT Hub of failure
         try:
-            if 'storage_info' in locals():
-                await device_client.notify_blob_upload_status(
-                    storage_info['correlationId'],
-                    False,
-                    500,
-                    str(e)
-                )
+            await device_client.notify_blob_upload_status(
+                storage_info['correlationId'],
+                False,
+                500,
+                str(e)
+            )
         except Exception:
             pass
+        return  # Exit early on upload failure
+
+    # Upload succeeded - notify IoT Hub of success
+    try:
+        await device_client.notify_blob_upload_status(
+            storage_info['correlationId'],
+            True,
+            200,
+            "OK"
+        )
+    except Exception as e:
+        # Upload succeeded but notification failed - log warning
+        logger.warning(f"Blob uploaded successfully but notification failed: {e}")
