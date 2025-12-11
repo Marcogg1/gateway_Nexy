@@ -6,11 +6,14 @@ from config import Config
 class DPSClient:
     """
     Class for handling Device Provisioning Service (DPS) operations.
+
+    Attributes:
+        x509 (X509): The X.509 certificate details for device authentication.
     
     Methods:
         create_provisioning_device() -> RegistrationResult:
         
-    Returns:
+        Asynchronously create and register a provisioning device using X.509 certificates.
     """
 
     def __init__(self) -> None:

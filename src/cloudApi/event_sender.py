@@ -5,7 +5,7 @@ from azure.iot.device import Message
 
 class EventSender:
     """
-    Class for sending telemetry messages events to IoT Hub.
+    Class for sending telemetry event messages to IoT Hub.
 
     Attributes:
         device_client (IoTHubDeviceClient): The IoT Hub device client used to send messages.
