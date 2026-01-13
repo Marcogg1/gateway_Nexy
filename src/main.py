@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from cloudApi.dps_client import DPSClient 
 from cloudApi.device_client import DeviceClientFactory
 from cloudApi.method_request_handler import MethodRequestHandler
@@ -7,6 +8,11 @@ from cloudApi.event_sender import EventSender
 from azure.iot.device.aio import IoTHubDeviceClient
 from cloudApi.device_twin_desired_handler import DeviceTwinDesiredHandler    
 from liftApi.lift_simulator import LiftSimulator
+from lib.logging_config import setup_logging, get_logger
+
+# Setup logging at module level
+setup_logging()
+logger = get_logger(__name__)
 
 
 async def main():
@@ -14,14 +20,14 @@ async def main():
      Main asynchronous function to initialize and run the IoT device client.
     """
     
-    print("Starting main")
+    logger.info("Starting main")
 
     #Provisioning device client
     try:
         dps = DPSClient()
         registration_result = await dps.create_provisioning_device()
     except Exception as e:
-        print(f"Provisioning failed: {e}")
+        logger.error(f"Provisioning failed: {e}", exc_info=True)
         return
 
     #Create device client
@@ -29,9 +35,9 @@ async def main():
         factory = DeviceClientFactory(registration_result)  
         device_client = factory.create_client()
         await device_client.connect()
-        print("Device connected to IoT Hub")
+        logger.info("Device connected to IoT Hub")
     except Exception as e:
-        print(f"Device client creation/connect failed: {e}")
+        logger.error(f"Device client creation/connect failed: {e}", exc_info=True)
         return
     
     
@@ -43,7 +49,7 @@ async def main():
         liftSim = LiftSimulator(reporter, send_event) # Init lift simulator, used for testing device twin reporting. Remove when not needed
         desired_handler = await DeviceTwinDesiredHandler.create(device_client)
     except Exception as e:
-        print(f"Handler initialization failed: {e}")
+        logger.error(f"Handler initialization failed: {e}", exc_info=True)
         return
 
     #Run in parallel

@@ -3,12 +3,15 @@ import os
 import sys
 import json
 import shutil
+import logging
 from enum import Enum, unique
 
 source_path = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 root_path = os.path.abspath(os.path.join(source_path, os.path.pardir))
 sys.path.append(source_path)
 from lib.error_signals import DhCode
+
+logger = logging.getLogger(__name__)
 
 
 @unique
@@ -79,7 +82,6 @@ class DiskHandler:
         """
         self.DhCode = DhCode
         self.name = self.DhCode.SOURCE.value
-        self.print = print
 
         # Limit set as 10%
         limit = 0.1
@@ -95,8 +97,7 @@ class DiskHandler:
             self.file_status = self.sfs_config[ConfigItems.FILE_STATUS.value]
 
         except Exception as e:
-            self.print("Error: Could not use config file")
-            self.print(e)
+            logger.error("Could not use config file", exc_info=True)
             # raise SystemExit TODO: Remove comment
 
     def check_status(self, args: list) -> tuple[str, str, str]:
@@ -141,12 +142,11 @@ class DiskHandler:
         else:
             # set status to error since could not determine status
             status = self.file_status[FileStatusNames.ERROR.value]
-            self.print("Error: could not determine file status")
+            logger.error("Could not determine file status")
 
         # Check if disk usage is past allowed limit
         if not self.check_enough_free_space():
-            self.print("Not enough free space on disk. Free space: {0}, free space limit: {1}".
-                       format(self.get_disk_info(DiskArea.FREE.value), self.free_disk_space_limit))
+            logger.warning(f"Not enough free space on disk. Free space: {self.get_disk_info(DiskArea.FREE.value)}, free space limit: {self.free_disk_space_limit}")
             return status, self.name, self.DhCode.DISK_LIMIT_ERR.name
 
         return status, self.name, self.DhCode.NO_ERR.name
@@ -167,7 +167,7 @@ class DiskHandler:
         elif spec == DiskArea.FREE.value:
             disk_stat = disk_info.free
         else:
-            self.print("Error: Disk info specifier: {0} is not supported".format(spec))
+            logger.error(f"Disk info specifier: {spec} is not supported")
         return int(disk_stat) >> 20
 
     def check_enough_free_space(self) -> bool:
@@ -231,14 +231,14 @@ class DiskHandler:
         """
 
         if not isinstance(args, list) or len(args) != 2:
-            self.print("Error: expected input argument list with length 2 - got [{}]".format(args))
+            logger.error(f"Expected input argument list with length 2 - got [{args}]")
             return '-1', '-1'
 
         type: str = args[0]
         filename: str = args[1]
 
         if not isinstance(type, str) or not isinstance(filename, str):
-            self.print("Error: inputs must be string")
+            logger.error("Inputs must be string")
             return '-1', '-1'
 
         # Intify the type
@@ -246,8 +246,7 @@ class DiskHandler:
             int(type, 16)
 
         except ValueError as e:
-            self.print("Error: could not convert input to int")
-            self.print(e)
+            logger.error("Could not convert input to int", exc_info=True)
             return '-1', '-1'
 
         return type, filename
@@ -264,7 +263,7 @@ class DiskHandler:
                     ConfigNames.PATH.value in self.sfs_config[key]:
                 return self.sfs_config[key][ConfigNames.PATH.value]
 
-        self.print("Error: could not find path attribute for file type: {}".format(type_in))
+        logger.error(f"Could not find path attribute for file type: {type_in}")
         return '-1'
 
     def print_config(self) -> None:
@@ -272,21 +271,19 @@ class DiskHandler:
         Print parsed information from JSON config file.
         :return: void
         """
-        print(self.sfs_config[ConfigItems.FILE_STATUS.value][ConfigNames.COMMENT.value])
+        logger.info(self.sfs_config[ConfigItems.FILE_STATUS.value][ConfigNames.COMMENT.value])
         for status in FileStatusNames:
-            print(status.value + ": " + self.file_status[status.value])
-        print()
+            logger.info(f"{status.value}: {self.file_status[status.value]}")
 
         for item in ConfigItems:
             if item == ConfigItems.FILE_STATUS:
                 continue
-            print(self.sfs_config[item.value][ConfigNames.COMMENT.value])
-            print("Path: " + self.sfs_config[item.value][ConfigNames.PATH.value])
-            print("Filename: " + self.sfs_config[item.value][ConfigNames.FILENAME.value])
-            print("Write: " + self.sfs_config[item.value][ConfigNames.WRITE.value])
-            print("Read: " + self.sfs_config[item.value][ConfigNames.READ.value])
-            print("Type: " + self.sfs_config[item.value][ConfigNames.TYPE.value])
-            print()
+            logger.info(self.sfs_config[item.value][ConfigNames.COMMENT.value])
+            logger.info(f"Path: {self.sfs_config[item.value][ConfigNames.PATH.value]}")
+            logger.info(f"Filename: {self.sfs_config[item.value][ConfigNames.FILENAME.value]}")
+            logger.info(f"Write: {self.sfs_config[item.value][ConfigNames.WRITE.value]}")
+            logger.info(f"Read: {self.sfs_config[item.value][ConfigNames.READ.value]}")
+            logger.info(f"Type: {self.sfs_config[item.value][ConfigNames.TYPE.value]}")
 
 
 if __name__ == "__main__":

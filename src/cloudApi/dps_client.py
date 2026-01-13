@@ -1,6 +1,9 @@
+import logging
 from azure.iot.device import X509, RegistrationResult
 from azure.iot.device.aio import ProvisioningDeviceClient
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 
 class DPSClient:
@@ -48,8 +51,9 @@ class DPSClient:
 
         register_result = await provisioning_client.register()
         if register_result.status == "assigned" and register_result.registration_state:
-            print("Device successfully registered.")
+            logger.info("Device successfully registered.")
             return register_result
         else:
+            logger.error(f"Provisioning failed: {register_result.status}")
             raise Exception (f"Provisioning failed: {register_result.status}")
             return None

@@ -1,3 +1,7 @@
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 class DeviceTwinReporter:
 
@@ -18,5 +22,4 @@ class DeviceTwinReporter:
                 reported_properties = {k: reported_properties}
             await self.device_client.patch_twin_reported_properties(reported_properties)
         except Exception as e:
-            print(f"Error reporting property with dot notation: {e}. Falling back to flat property.")
-        
+            logger.error(f"Error reporting property with dot notation: {e}. Falling back to flat property.", exc_info=True)

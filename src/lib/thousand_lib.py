@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import logging
 import os
 import sys
 import time
@@ -9,6 +10,11 @@ from _collections_abc import dict_keys
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)))
 from lib.error_signals import Rs232Code
+from lib.logging_config import setup_logging, get_logger
+
+# Setup logging at module level
+setup_logging()
+logger = get_logger(__name__)
 
 
 class ThousandLib:
@@ -17,7 +23,7 @@ class ThousandLib:
     """
     def __init__(self) -> None:
         self.name: str = 'ThousandLib'
-        self.print = print  # TODO: Remove after adding logging
+        self.logger = logger
         self.database: dict = dict()
         self.params_lift_ar: Type[Params1k_lift_AR] = Params1k_lift_AR
         self.params_lift_type: Type[Params1k_lift_type] = Params1k_lift_type
@@ -58,10 +64,10 @@ class ThousandLib:
         try:
             val = self.database[param].value
             if val == "":
-                self.print(f"Value for param {param} not set. Has the param been polled? Or is the param empty on U1?")
+                self.logger.error(f"Value for param {param} not set. Has the param been polled? Or is the param empty on U1?")
                 return -1, self.rs232Codes.PARAM_NOT_SET.name
         except Exception as e:
-            self.print(e)
+            self.logger.error(e)
             return -1, self.rs232Codes.PARAM_NOT_IN_DB.name
         # self.__reset_vfd_motor_param_after_read(param)
         return val, self.rs232Codes.NO_ERR.name
@@ -183,11 +189,11 @@ class ThousandLib:
             elif signal.value == self.params_virtual.FLOOR_LOCK.value:
                 new_val, latest_err_code = self.__update_floor_lock()
             else:
-                self.print(f"Error: Virtual signal {signal.name} is not supported.")
+                self.logger.error(f"Error: Virtual signal {signal.name} is not supported.")
                 latest_err_code = self.rs232Codes.PARAM_NOT_IN_DB.name
 
             if latest_err_code != self.rs232Codes.NO_ERR.name:
-                self.print(f"Error: Failed to unpack signal {signal.name}. Reason: {latest_err_code}")
+                self.logger.error(f"Error: Failed to unpack signal {signal.name}. Reason: {latest_err_code}")
                 err_code = latest_err_code
                 continue
 
@@ -209,7 +215,7 @@ class ThousandLib:
         for signal_nr in self.params_door_open_count:
             read_value, latest_err_code = self.__unpack_signal(self.database[signal_nr.value], response)
             if latest_err_code != self.rs232Codes.NO_ERR.name:
-                self.print("Error: Faulty when unpacking door open counter")
+                self.logger.error("Error: Faulty when unpacking door open counter")
                 return [], latest_err_code
 
             if (int(read_value) + self.previous_open_door_counters[i]) < self.total_open_door_counters[i]:
@@ -252,11 +258,11 @@ class ThousandLib:
         if len(response) != 0:
             door_no, latest_err_code = self.__unpack_signal(self.database[Params1k_135.DOOR_NUMBER.value], response)
             if latest_err_code != self.rs232Codes.NO_ERR.name:
-                print("Error: error when unpack signal Params1k_135.DOOR_NUMBER")
+                logger.error("Error: error when unpack signal Params1k_135.DOOR_NUMBER")
                 return [], latest_err_code
             door_time, latest_err_code = self.__unpack_signal(self.database[Params1k_135.DOOR_CLOSING_TIME.value], response)
             if latest_err_code != self.rs232Codes.NO_ERR.name:
-                print("Error: error when unpack signal Params1k_135.DOOR_CLOSING_TIME")
+                logger.error("Error: error when unpack signal Params1k_135.DOOR_CLOSING_TIME")
                 return [], latest_err_code
 
             if door_no == '1':
@@ -278,7 +284,7 @@ class ThousandLib:
                 self.database[self.params_door_closing_time.DOOR_6_CLOSING_TIME_135.value].value = door_time
                 signal = self.params_door_closing_time.DOOR_6_CLOSING_TIME_135.value
             else:
-                self.print("Error: Invalid door number when setting door closing time")
+                self.logger.error("Error: Invalid door number when setting door closing time")
                 err_code = self.rs232Codes.DATA_ERR.name
                 return [], err_code
 
@@ -319,7 +325,7 @@ class ThousandLib:
             signal_nr = self.params_vfdResult.VFD_DRIVE_THERMAL_STATE
 
         else:
-            self.print(f"Error: Invalid or not used VFD ID: {id}")
+            self.logger.error(f"Error: Invalid or not used VFD ID: {id}")
             return [], self.rs232Codes.VFD_ID_ERR.name
 
         if signal_nr:
@@ -327,7 +333,7 @@ class ThousandLib:
                 self.__unpack_vfdResult_data(self.database[signal_nr.value], data)
             changed_signal.append(signal_nr.value)
         else:
-            self.print("Error: Signal nr is missing")
+            self.logger.error("Error: Signal nr is missing")
             return [], self.rs232Codes.VFD_ID_ERR.name
 
         return changed_signal, err_code
@@ -345,7 +351,7 @@ class ThousandLib:
         floor_6_lock:int = self.database[self.params_130.FLOOR_6_FLOOR_LOCK_130.value].value
 
         if None in (floor_1_lock, floor_2_lock, floor_3_lock, floor_4_lock, floor_5_lock, floor_6_lock):
-            self.print("Error: One or more of the individual floor lock variables are not set, cannot calculate"
+            self.logger.error("Error: One or more of the individual floor lock variables are not set, cannot calculate"
                        "the virtual floor lock variable.")
             return '-1', self.rs232Codes.PARTIAL_ERR.name
 
@@ -354,8 +360,8 @@ class ThousandLib:
             int_val:int = int(bin_val, 2)
             str_val:str = str(int_val)
         except ValueError as e:
-            self.print(e)
-            self.print(f"Error: Failed to convert: {bin_val} to integer")
+            self.logger.error(e)
+            self.logger.error(f"Error: Failed to convert: {bin_val} to integer")
             return '-1', self.rs232Codes.PARTIAL_ERR.name
 
         return str_val, self.rs232Codes.NO_ERR.name
@@ -369,15 +375,15 @@ class ThousandLib:
         try:
             latest_raw, _ = self.__unpack_signal(self.database[signal_nr], self.latest_responses['134'])
         except KeyError as e:
-            self.print(e)
-            self.print(f"Error: No latest response to use for unpacking signal {self.database[signal_nr]}.")
+            self.logger.error(e)
+            self.logger.error(f"Error: No latest response to use for unpacking signal {self.database[signal_nr]}.")
             return '-1', self.rs232Codes.PARTIAL_ERR.name
         try:
             int_val:int = int(int(latest_raw)/100)
             str_val:str = str(int_val)
         except Exception as e:
-            self.print(e)
-            self.print("Error: Temp_134.value is missing in database")
+            self.logger.error(e)
+            self.logger.error("Error: Temp_134.value is missing in database")
             return "-1", self.rs232Codes.PARTIAL_ERR.name
 
         return str_val, self.rs232Codes.NO_ERR.name
@@ -394,8 +400,8 @@ class ThousandLib:
             else:
                 return '-1', self.rs232Codes.PARTIAL_ERR.name
         except Exception as e:
-            self.print("Error: PROG_NAME_2 missing in database. Cant unpack impulse.")
-            self.print(e)
+            self.logger.error("Error: PROG_NAME_2 missing in database. Cant unpack impulse.")
+            self.logger.error(e)
             return '-1', self.rs232Codes.PARAM_NOT_IN_DB.name
 
         # Hold to run or automatic run is stored in the last character of progname as H or I.
@@ -416,8 +422,8 @@ class ThousandLib:
             latest_raw_val, latest_err_code = self.__unpack_signal(self.database[signal_nr],
                                                                    self.latest_responses['130'])
         except KeyError as error:
-            self.print(f"Error: No latest response to use for unpacking signal {signal_nr}.")
-            self.print(error)
+            self.logger.error(f"Error: No latest response to use for unpacking signal {signal_nr}.")
+            self.logger.error(error)
             return '-1', self.rs232Codes.PARTIAL_ERR.name
 
         val: str
@@ -451,7 +457,7 @@ class ThousandLib:
             try:
                 self.__validate_bytes(signal, response)
             except Exception as e:
-                self.print(e)
+                self.logger.error(e)
                 return unpacked_as_str, self.rs232Codes.PARTIAL_ERR.name
 
         if signal.signal_type == 'uint':
@@ -477,7 +483,7 @@ class ThousandLib:
             unpacked_as_str = self.__unpack_generic_text(signal, response)
 
         else:
-            self.print(f"Signal type not supported: {signal.signal_type}.")
+            self.logger.error(f"Signal type not supported: {signal.signal_type}.")
             return unpacked_as_str, self.rs232Codes.PARTIAL_ERR.name
 
         return unpacked_as_str, self.rs232Codes.NO_ERR.name
@@ -498,10 +504,10 @@ class ThousandLib:
                 if not 0 <= byte_as_int <= 255:
                     raise ValueError
         except IndexError as e:
-            # Don't print error messages when new GW tries to read data not part of the ARGate response
+            # Don't log error messages when new GW tries to read data not part of the ARGate response
             raise IndexError()
         except ValueError as e:
-            self.print(e)
+            self.logger.error(e)
             raise ValueError("Bad data received on serial bus?")
 
     @staticmethod
@@ -578,15 +584,15 @@ class ThousandLib:
         """
         generic_text: str
         if len(response[signal.byte_start]) >= signal.byte_size:
-            self.print("The generic texts number's length was above what is supported (how)?")
-            self.print(f"Original text: {response[signal.byte_start]},"
+            self.logger.warning("The generic texts number's length was above what is supported (how)?")
+            self.logger.info(f"Original text: {response[signal.byte_start]},"
                        f"new text: {response[signal.byte_start][:signal.byte_size-1]}")
             generic_text = response[signal.byte_start][:signal.byte_size-1]
         else:
             generic_text = response[signal.byte_start]
 
         if ',' in generic_text or '_' in generic_text:
-            self.print("Commas, underscores not supported in generic texts, replacing with spaces.")
+            self.logger.info("Commas, underscores not supported in generic texts, replacing with spaces.")
             generic_text = generic_text.replace(',', ' ')
             generic_text = generic_text.replace('_', ' ')
         return generic_text
@@ -864,8 +870,8 @@ class ThousandLib:
             self.database[self.params_door_open_count.DOOR_6_OPEN_COUNT.value] = Signal("", 'Door6OpenCount', 0,32,20,4,'uint')
 
         except Exception as error:
-            self.print("Error: Init database failed")
-            self.print(error)
+            self.logger.error("Error: Init database failed")
+            self.logger.error(error)
             raise error
 
 
@@ -875,8 +881,7 @@ class Signal:
     """
     def __init__(self, value: str, name: str, bit_start: int, bit_size: int,
                  byte_start: int, byte_size: int, signal_type: str):
-        self.print_name = "Signal_1k"
-        self.print = print
+        self.logger = logger
         try:
             self.name: str | int = self.__assert_and_return(name, str)
             self.value: str | int = self.__assert_and_return(value, str)
@@ -886,7 +891,7 @@ class Signal:
             self.byte_size: str | int = self.__assert_and_return(byte_size, int)
             self.signal_type: str | int = self.__assert_and_return(signal_type, str)
         except TypeError as e:
-            self.print(e)
+            self.logger.error(e)
             raise e
 
         if self.signal_type == "byte" and int(self.bit_start) + int(self.bit_size) > 8:

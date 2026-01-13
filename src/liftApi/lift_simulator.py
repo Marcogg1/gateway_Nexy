@@ -10,7 +10,11 @@ import random
 import asyncio
 import json
 import time
+import logging
 from azure.iot.device import Message
+
+# Setup logging
+logger = logging.getLogger(__name__)
 
 class LiftSimulator:
     def __init__(self, reporter: DeviceTwinReporter, event_sender: EventSender | None = None) -> None:
@@ -29,7 +33,7 @@ class LiftSimulator:
             # Simulera temperaturvärde
             temperature = round(20 + random.uniform(-2, 2), 2)
             await self.reporter.report_property("temperature", temperature)
-            print(f"Reported temperature: {temperature}°C")
+            logger.info(f"Reported temperature: {temperature}°C")
             await asyncio.sleep(60)  # Vänta 1 minut
 
     async def send_parameter_data(self):
@@ -56,5 +60,5 @@ class LiftSimulator:
             if self.event_sender:
                 await self.event_sender.send_event(payload)
             else:
-                print("EventSender not configured; skipping send")
+                logger.warning("EventSender not configured; skipping send")
 

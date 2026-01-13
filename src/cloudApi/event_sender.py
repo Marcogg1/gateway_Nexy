@@ -1,6 +1,9 @@
 import json
+import logging
 from azure.iot.device.aio import IoTHubDeviceClient
 from azure.iot.device import Message
+
+logger = logging.getLogger(__name__)
 
 
 class EventSender:
@@ -34,6 +37,14 @@ class EventSender:
             message.custom_properties["LIFT_TYPE"] = "1" # Lift type is set when GW is setting up communicationtowards lift
             
             await self.device_client.send_message(message)
-            print(f"Event sent: {payload}")
+            logger.info(f"Event sent: {payload}")
+
+            # Log messages at all levels for testing purposes, to be removed in next issue
+            logger.debug("debug logging")
+            logger.info("info logging")
+            logger.warning("warning logging")
+            logger.error("error logging")
+            logger.critical("critical logging")
+
         except Exception as e:
-            print(f"Failed to send event: {e}")
+            logger.error(f"Failed to send event: {e}", exc_info=True)

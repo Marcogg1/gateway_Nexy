@@ -3,6 +3,7 @@
 import os
 import sys
 import time
+import logging
 from math import ceil
 from typing import Type, Any
 from datetime import datetime, timezone
@@ -12,6 +13,8 @@ sys.path.append(path_to_source)
 
 from lib.error_signals import SyncTimeCode, MbCode, Rs232Code
 
+logger = logging.getLogger(__name__)
+
 
 class SyncTimeHandler:
     """
@@ -20,23 +23,21 @@ class SyncTimeHandler:
     def __init__(self) -> None:
         self.SyncTimeCode: Type[SyncTimeCode] = SyncTimeCode
         self.name: str = self.SyncTimeCode.SOURCE.value
-        self.print = print
 
     def sync_time_rs232(self, epoch_time: str, rs232_handler: Any) -> tuple[Any, str, str]:
         try:
             int(epoch_time)
         except ValueError as e:
-            self.print(f"Error: inserted epoch_time '{epoch_time}' is not an int.")
-            self.print(e)
+            logger.error(f"Error: inserted epoch_time '{epoch_time}' is not an int.", exc_info=True)
             return -1, self.name, self.SyncTimeCode.ARG_TYPE_ERR.name
 
         if epoch_time == '-1':
             epoch_time = str(self.__get_utc_time())
-            self.print(f"Got time -1, setting UTC_time:{epoch_time}")
+            logger.info(f"Got time -1, setting UTC_time:{epoch_time}")
 
         _, _, _, _, err_code = rs232_handler.write_serial(["time", epoch_time])
         if err_code != Rs232Code.NO_ERR.name:
-            self.print(f"Error: failed to write time read request to the serial bus.")
+            logger.error(f"Error: failed to write time read request to the serial bus.")
             return -1, self.name, err_code
 
         time.sleep(rs232_handler.serial_timeout)
@@ -44,7 +45,7 @@ class SyncTimeHandler:
         response = resp_wanted[0]['updated']
 
         if err_code != SyncTimeCode.NO_ERR.name:
-            self.print("Error: Failed to get time read response from serial buffer.")
+            logger.error("Error: Failed to get time read response from serial buffer.")
             return -1, self.name, err_code
 
         if response == 'false':
@@ -56,8 +57,7 @@ class SyncTimeHandler:
         try:
             time_value_int: int = int(time_value_str)
         except ValueError as error:
-            self.print(error)
-            self.print("Error: Time value '{}' in signal is not a number".format(time_value_str))
+            logger.error(f"Error: Time value '{time_value_str}' in signal is not a number", exc_info=True)
             return self.name, self.SyncTimeCode.ARG_TYPE_ERR.name
 
         timestamp: int
@@ -66,21 +66,21 @@ class SyncTimeHandler:
         elif time_value_int > -1:
             timestamp = time_value_int
         else:
-            self.print("Error: Invalid time value in signal")
+            logger.error("Error: Invalid time value in signal")
             return self.name, self.SyncTimeCode.ARG_INVALID_ERR.name
 
         return self.__update_parameter(modbus_handler, timestamp)
 
     def __update_parameter(self, modbus_handler: Any, timestamp: int) -> tuple[str, str]:
         if not modbus_handler:
-            self.print("Error: No valid Modbus Handler object provided")
+            logger.error("Error: No valid Modbus Handler object provided")
             return self.name, self.SyncTimeCode.ARG_MODBUS_ERR.name
 
         time_parameter_number = "4"
         try:
             modbus_response = modbus_handler.write_parameter([time_parameter_number, str(timestamp)])
         except Exception as error:
-            self.print(error)
+            logger.error("Modbus exception occurred", exc_info=True)
             return self.name, self.SyncTimeCode.MODBUS_EXCEPTION_ERR.name
 
         return self.__handle_modbus_response(modbus_response)
@@ -92,11 +92,11 @@ class SyncTimeHandler:
             actual_response_length = len(modbus_response)
 
         if actual_response_length != expected_response_length:
-            self.print("Error: Modbus Handler returned unexpected response: '{}'".format(modbus_response))
+            logger.error(f"Error: Modbus Handler returned unexpected response: '{modbus_response}'")
             return self.name, self.SyncTimeCode.MODBUS_ERR.name
 
         if modbus_response[2] != MbCode.NO_ERR.name:
-            self.print("Error: Modbus Handler returned error response: '{}'".format(modbus_response))
+            logger.error(f"Error: Modbus Handler returned error response: '{modbus_response}'")
             source: str = modbus_response[1]
             error_code: Any = modbus_response[2]
             return source, error_code
@@ -106,7 +106,7 @@ class SyncTimeHandler:
     def __get_utc_time(self) -> int:
         utc: datetime = datetime.now(timezone.utc)
         utc_timestamp: int = ceil(utc.timestamp())
-        self.print("UTC timestamp: {}".format(utc_timestamp))
+        logger.info(f"UTC timestamp: {utc_timestamp}")
         return utc_timestamp
 
 
