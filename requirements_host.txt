@@ -10,3 +10,4 @@ types-pyserial
 freezegun
 azure-iot-device
 azure-storage-blob
+pyyaml
