@@ -11,3 +11,4 @@ freezegun
 azure-iot-device
 azure-storage-blob
 pyyaml
+types-PyYAML
