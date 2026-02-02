@@ -2866,3 +2866,287 @@ class TestRs232Handler:
         assert self.rs.check_if_above_or_equal_to_versions(["3.12", "0.0"])
 
         assert self.rs.check_if_above_or_equal_to_versions(["4.6", "1.1"])
+
+
+class TestRs232HandlerAsync:
+    """
+    Test suite for the Rs232HandlerAsync wrapper class.
+    
+    These tests verify the async polling functionality including:
+    - Single poll execution
+    - Automatic polling at 5-second intervals
+    - Single thread execution guarantee (via asyncio.Lock)
+    - Start/stop polling operations
+    - Error handling
+    """
+    
+    @mock.patch('os.path.exists')
+    @mock.patch('socket.socket')
+    @mock.patch('serial.Serial')
+    def setup_method(self, method, mock_serial, mock_socket, mock_path_exists):
+        """Setup test fixtures before each test method."""
+        import asyncio
+        
+        print("\nSetup: {}".format(method.__name__))
+        
+        mock_serial.return_value = Serial
+        mock_socket.return_value = Serial
+        mock_path_exists.return_value = False
+        
+        # Create a mock Rs232Handler
+        self.mock_rs232_handler = mock.MagicMock(spec=RS.Rs232Handler)
+        self.mock_rs232_handler.rs232Codes = RS.Rs232Handler().rs232Codes
+        
+        # Create the async wrapper with the mocked handler
+        self.rs_async = RS.Rs232HandlerAsync(rs232_handler=self.mock_rs232_handler)
+        
+    def teardown_method(self, method):
+        """Cleanup after each test method."""
+        print("\nTest done: {}\n".format(method.__name__))
+    
+    @pytest.mark.asyncio
+    async def test_poll_lift_single_execution(self):
+        """Test that poll_lift executes a single poll cycle successfully."""
+        # Setup mock response
+        expected_response = ("test_datax123x456", "Rs232Handler", "NO_ERR")
+        self.mock_rs232_handler.poll_lift.return_value = expected_response
+        
+        # Execute poll
+        response, name, err_code = await self.rs_async.poll_lift(poll_type='0')
+        
+        # Verify results
+        assert response == expected_response[0]
+        assert name == expected_response[1]
+        assert err_code == expected_response[2]
+        
+        # Verify the underlying handler was called with correct arguments
+        self.mock_rs232_handler.poll_lift.assert_called_once_with(['0'])
+    
+    @pytest.mark.asyncio
+    async def test_poll_lift_with_poll_type_1(self):
+        """Test poll_lift with poll_type='1' (all file packages)."""
+        expected_response = ("all_packagesx789", "Rs232Handler", "NO_ERR")
+        self.mock_rs232_handler.poll_lift.return_value = expected_response
+        
+        response, name, err_code = await self.rs_async.poll_lift(poll_type='1')
+        
+        assert response == expected_response[0]
+        assert name == expected_response[1]
+        assert err_code == expected_response[2]
+        self.mock_rs232_handler.poll_lift.assert_called_once_with(['1'])
+    
+    @pytest.mark.asyncio
+    async def test_poll_lift_single_thread_guarantee(self):
+        """Test that only one poll executes at a time using asyncio.Lock."""
+        import asyncio
+        
+        poll_execution_order = []
+        
+        async def slow_poll_lift(args):
+            """Simulates a slow poll operation."""
+            poll_execution_order.append('start')
+            await asyncio.sleep(15.0)  # Simulate work
+            poll_execution_order.append('end')
+            return ("data", "Rs232Handler", "NO_ERR")
+        
+        # Replace the synchronous poll with our async version for testing
+        original_poll = self.mock_rs232_handler.poll_lift
+        
+        def sync_slow_poll(args):
+            """Wrapper to run async function in sync context."""
+            import time
+            poll_execution_order.append('start')
+            time.sleep(5.0)  # Simulate work
+            poll_execution_order.append('end')
+            return ("data", "Rs232Handler", "NO_ERR")
+        
+        self.mock_rs232_handler.poll_lift.side_effect = sync_slow_poll
+        
+        # Start two polls simultaneously
+        task1 = asyncio.create_task(self.rs_async.poll_lift('0'))
+        task2 = asyncio.create_task(self.rs_async.poll_lift('0'))
+        
+        # Wait for both to complete
+        await asyncio.gather(task1, task2)
+        
+        # Verify that polls executed sequentially, not concurrently
+        # We should see: ['start', 'end', 'start', 'end']
+        # NOT: ['start', 'start', 'end', 'end']
+        assert len(poll_execution_order) == 4
+        assert poll_execution_order == ['start', 'end', 'start', 'end'], \
+            f"Polls executed concurrently! Order: {poll_execution_order}"
+    
+    @pytest.mark.asyncio
+    async def test_start_polling_initiates_background_task(self):
+        """Test that start_polling creates a background polling task."""
+        import asyncio
+        self.mock_rs232_handler.poll_lift.return_value = ("data", "Rs232Handler", "NO_ERR")
+        
+        # Start polling
+        await self.rs_async.start_polling(poll_type='0')
+        
+        # Verify polling is active
+        assert self.rs_async.is_polling() is True
+        assert self.rs_async._polling_task is not None
+        
+        # Wait a short time to ensure at least one poll happens
+        await asyncio.sleep(0.2)
+        
+        # Stop polling
+        await self.rs_async.stop_polling()
+        
+        # Verify polling stopped
+        assert self.rs_async.is_polling() is False
+    
+    @pytest.mark.asyncio
+    async def test_polling_interval_timing(self):
+        """Test that polling occurs at the correct 5-second interval."""
+        import asyncio
+        import time
+        
+        poll_times = []
+        
+        def record_poll_time(args):
+            poll_times.append(time.time())
+            return ("data", "Rs232Handler", "NO_ERR")
+        
+        self.mock_rs232_handler.poll_lift.side_effect = record_poll_time
+        
+        # Set a shorter interval for testing (1 second instead of 5)
+        self.rs_async.poll_interval = 1
+        
+        # Start polling
+        await self.rs_async.start_polling(poll_type='0')
+        
+        # Wait for at least 3 polls to occur
+        await asyncio.sleep(2.5)
+        
+        # Stop polling
+        await self.rs_async.stop_polling()
+        
+        # Verify we got multiple polls
+        assert len(poll_times) >= 2, f"Expected at least 2 polls, got {len(poll_times)}"
+        
+        # Verify timing between polls is approximately 1 second
+        if len(poll_times) >= 2:
+            interval = poll_times[1] - poll_times[0]
+            assert 0.9 <= interval <= 1.2, f"Expected ~1s interval, got {interval}s"
+    
+    @pytest.mark.asyncio
+    async def test_stop_polling_when_not_running(self):
+        """Test that stop_polling handles being called when not running."""
+        # Stop polling when it's not running (should not raise exception)
+        await self.rs_async.stop_polling()
+        assert self.rs_async.is_polling() is False
+    
+    @pytest.mark.asyncio
+    async def test_start_polling_when_already_running(self):
+        """Test that start_polling handles being called when already running."""
+        self.mock_rs232_handler.poll_lift.return_value = ("data", "Rs232Handler", "NO_ERR")
+        
+        # Start polling
+        await self.rs_async.start_polling(poll_type='0')
+        assert self.rs_async.is_polling() is True
+        
+        # Try to start again (should not create a new task)
+        task1 = self.rs_async._polling_task
+        await self.rs_async.start_polling(poll_type='0')
+        task2 = self.rs_async._polling_task
+        
+        # Should be the same task
+        assert task1 is task2
+        
+        # Cleanup
+        await self.rs_async.stop_polling()
+    
+    @pytest.mark.asyncio
+    async def test_poll_lift_error_handling(self):
+        """Test that poll_lift handles errors from the underlying handler."""
+        # Setup mock to return an error
+        error_response = ("-1", "Rs232Handler", "SERIAL_COM_ERR")
+        self.mock_rs232_handler.poll_lift.return_value = error_response
+        
+        # Execute poll
+        response, name, err_code = await self.rs_async.poll_lift(poll_type='0')
+        
+        # Verify error is propagated
+        assert response == error_response[0]
+        assert err_code == "SERIAL_COM_ERR"
+    
+    @pytest.mark.asyncio
+    async def test_polling_loop_continues_after_error(self):
+        """Test that the polling loop continues even if a poll fails."""
+        import asyncio
+        
+        call_count = [0]
+        
+        def poll_with_intermittent_error(args):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise Exception("Simulated error")
+            return ("data", "Rs232Handler", "NO_ERR")
+        
+        self.mock_rs232_handler.poll_lift.side_effect = poll_with_intermittent_error
+        self.rs_async.poll_interval = 0.5
+        
+        # Start polling
+        await self.rs_async.start_polling(poll_type='0')
+        
+        # Wait for multiple polls
+        await asyncio.sleep(1.5)
+        
+        # Stop polling
+        await self.rs_async.stop_polling()
+        
+        # Verify polling continued after error
+        assert call_count[0] >= 2, "Polling should have continued after first error"
+    
+    @pytest.mark.asyncio
+    async def test_create_async_handler_without_existing_handler(self):
+        """Test that Rs232HandlerAsync can create its own Rs232Handler."""
+        import asyncio
+        
+        # Create async handler without providing a handler instance
+        with mock.patch('serial.Serial'):
+            rs_async_new = RS.Rs232HandlerAsync()
+            
+            # Verify it created its own handler
+            assert rs_async_new.rs232_handler is not None
+            assert isinstance(rs_async_new.rs232_handler, RS.Rs232Handler)
+    
+    @pytest.mark.asyncio
+    async def test_concurrent_poll_lift_calls_are_serialized(self):
+        """Test that multiple concurrent poll_lift calls are executed serially."""
+        import asyncio
+        
+        execution_log = []
+        
+        def logging_poll(args):
+            import time
+            execution_log.append(('start', args[0], time.time()))
+            time.sleep(0.05)  # Small delay
+            execution_log.append(('end', args[0], time.time()))
+            return (f"data_{args[0]}", "Rs232Handler", "NO_ERR")
+        
+        self.mock_rs232_handler.poll_lift.side_effect = logging_poll
+        
+        # Launch 3 polls concurrently
+        tasks = [
+            asyncio.create_task(self.rs_async.poll_lift('0')),
+            asyncio.create_task(self.rs_async.poll_lift('1')),
+            asyncio.create_task(self.rs_async.poll_lift('0'))
+        ]
+        
+        results = await asyncio.gather(*tasks)
+        
+        # Verify all completed successfully
+        assert len(results) == 3
+        assert all(r[2] == "NO_ERR" for r in results)
+        
+        # Verify execution was serialized (each start followed by its end before next start)
+        for i in range(0, len(execution_log) - 1, 2):
+            assert execution_log[i][0] == 'start'
+            assert execution_log[i + 1][0] == 'end'
+            # Verify the poll_type matches
+            assert execution_log[i][1] == execution_log[i + 1][1]
+

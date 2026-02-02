@@ -39,12 +39,5 @@ class EventSender:
             await self.device_client.send_message(message)
             logger.info(f"Event sent: {payload}")
 
-            # Log messages at all levels for testing purposes, to be removed in next issue
-            logger.debug("debug logging")
-            logger.info("info logging")
-            logger.warning("warning logging")
-            logger.error("error logging")
-            logger.critical("critical logging")
-
         except Exception as e:
             logger.error(f"Failed to send event: {e}", exc_info=True)
