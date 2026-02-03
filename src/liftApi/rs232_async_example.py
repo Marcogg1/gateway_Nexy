@@ -108,14 +108,14 @@ async def example_with_custom_interval():
     """
     Example 4: Automatic polling with custom interval.
     
-    This shows how to customize the polling interval (default is 10 seconds).
+    This shows how to customize the polling interval (default is 5 seconds).
     """
     logger.info("Example 4: Custom polling interval (5 seconds)")
     
     rs_async = Rs232HandlerAsync()
     
     # Customize the polling interval
-    rs_async.poll_interval = 5  # 5 seconds instead of default 10
+    rs_async.poll_interval = 3  # 3 seconds instead of default 5
     
     try:
         await rs_async.start_polling(poll_type='0')

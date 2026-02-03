@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import asyncio
 import datetime
 import logging
 import sys
@@ -1816,7 +1817,7 @@ class Rs232HandlerAsync:
     Async wrapper around Rs232Handler that provides periodic polling functionality.
     
     This class wraps the synchronous Rs232Handler and provides async polling
-    with automatic scheduling every 10 seconds. It ensures only one poll
+    with automatic scheduling every 5 seconds. It ensures only one poll
     cycle executes at a time using an asyncio.Lock.
     """
     
@@ -1837,7 +1838,6 @@ class Rs232HandlerAsync:
     async def _initialize_lock(self) -> None:
         """Initialize the asyncio lock in async context."""
         if self._poll_lock is None:
-            import asyncio
             self._poll_lock = asyncio.Lock()
     
     async def poll_lift(self, poll_type: str = '0') -> tuple[Any, str, str]:
@@ -1854,7 +1854,6 @@ class Rs232HandlerAsync:
         Returns:
             Tuple of (response, name, error_code) from the poll operation
         """
-        import asyncio
         
         await self._initialize_lock()
         
@@ -1881,7 +1880,6 @@ class Rs232HandlerAsync:
             poll_type: '0' for reading one file package per poll,
                       '1' for reading all file packages per poll
         """
-        import asyncio
         
         self.logger.info(f"Starting polling loop with {self.poll_interval}s interval, poll_type={poll_type}")
         
@@ -1912,7 +1910,6 @@ class Rs232HandlerAsync:
             poll_type: '0' for reading one file package per poll (default),
                       '1' for reading all file packages per poll
         """
-        import asyncio
         
         if self._running:
             self.logger.warning("Polling is already running")
@@ -1930,7 +1927,6 @@ class Rs232HandlerAsync:
         This method gracefully stops the polling task and waits for any
         in-progress poll to complete.
         """
-        import asyncio
         if not self._running:
             self.logger.warning("Polling is not running")
             return
