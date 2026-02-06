@@ -3,6 +3,7 @@
 """Unit tests for blob upload functionality."""
 
 import asyncio
+import inspect
 import os
 import sys
 import unittest
@@ -87,7 +88,7 @@ def async_test(coro):
 
 # Apply decorator to async tests
 for name in dir(TestBlobUpload):
-    if name.startswith('test_') and asyncio.iscoroutinefunction(getattr(TestBlobUpload, name)):
+    if name.startswith('test_') and inspect.iscoroutinefunction(getattr(TestBlobUpload, name)):
         setattr(TestBlobUpload, name, async_test(getattr(TestBlobUpload, name)))
 
 
