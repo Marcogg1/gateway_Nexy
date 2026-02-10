@@ -1902,6 +1902,286 @@ class TestThousandLib(unittest.TestCase):
             else:
                 assert not file
 
+    # ---- door_open_count_recalculate tests ----
+
+    def test_door_open_count_recalculate_normal(self):
+        """
+        Test normal operation: counters increment, changed signals returned.
+        Uses multi-byte values to exercise uint32 little-endian unpacking.
+        """
+        # 6 uint32 counters packed as little-endian (4 bytes each)
+        # Values: 10, 20, 300 (multi-byte), 400 (multi-byte), 50, 60
+        # 300 = 0x012C LE: [44, 1, 0, 0]; 400 = 0x0190 LE: [144, 1, 0, 0]
+        response = [10,0,0,0, 20,0,0,0, 44,1,0,0, 144,1,0,0, 50,0,0,0, 60,0,0,0]
+
+        changed_signals, err_code = self.tl.door_open_count_recalculate(response)
+
+        assert err_code == self.tl.rs232Codes.NO_ERR.name
+        assert len(changed_signals) == 6
+
+        # All 6 door open count param numbers should be in changed_signals
+        for signal in self.tl.params_door_open_count:
+            assert signal.value in changed_signals
+
+        # Verify database values
+        expected_values = [10, 20, 300, 400, 50, 60]
+        for i, signal in enumerate(self.tl.params_door_open_count):
+            assert self.tl.database[signal.value].value == expected_values[i]
+
+    def test_door_open_count_recalculate_no_change(self):
+        """
+        Test that calling twice with same values returns empty changed list on second call.
+        """
+        response = [10,0,0,0, 20,0,0,0, 30,0,0,0, 40,0,0,0, 50,0,0,0, 60,0,0,0]
+
+        # First call sets the values
+        self.tl.door_open_count_recalculate(response)
+
+        # Second call with same response should return no changed signals
+        changed_signals, err_code = self.tl.door_open_count_recalculate(response)
+
+        assert err_code == self.tl.rs232Codes.NO_ERR.name
+        assert len(changed_signals) == 0
+
+    def test_door_open_count_recalculate_lift_restart(self):
+        """
+        Test lift restart detection: when counter resets, previous counters are updated.
+        """
+        # First call: counters at [100, 200, 300, 400, 500, 600]
+        response_1 = [100,0,0,0, 200,0,0,0, 44,1,0,0, 144,1,0,0, 244,1,0,0, 88,2,0,0]
+        # 44,1 = 256+44 = 300; 144,1 = 256+144 = 400; 244,1 = 256+244 = 500; 88,2 = 512+88 = 600
+
+        changed_signals, err_code = self.tl.door_open_count_recalculate(response_1)
+        assert err_code == self.tl.rs232Codes.NO_ERR.name
+        assert len(changed_signals) == 6
+
+        # Verify totals are [100, 200, 300, 400, 500, 600]
+        assert self.tl.total_open_door_counters == [100, 200, 300, 400, 500, 600]
+
+        # Second call: counters reset to [5, 5, 5, 5, 5, 5] (lift restarted)
+        response_2 = [5,0,0,0, 5,0,0,0, 5,0,0,0, 5,0,0,0, 5,0,0,0, 5,0,0,0]
+
+        changed_signals, err_code = self.tl.door_open_count_recalculate(response_2)
+        assert err_code == self.tl.rs232Codes.NO_ERR.name
+        assert len(changed_signals) == 6
+        for signal in self.tl.params_door_open_count:
+            assert signal.value in changed_signals
+
+        # Restart detected: (5 + 0) < 100 for door 1, etc.
+        # previous becomes [100, 200, 300, 400, 500, 600]
+        # total becomes [5+100, 5+200, 5+300, 5+400, 5+500, 5+600]
+        assert self.tl.previous_open_door_counters == [100, 200, 300, 400, 500, 600]
+        assert self.tl.total_open_door_counters == [105, 205, 305, 405, 505, 605]
+        assert self.tl.reset_saved_open_door_counter is True
+
+    def test_door_open_count_recalculate_unpack_error(self):
+        """
+        Test that bad response data returns error code and empty list.
+        """
+        # Response too short - only 2 bytes, first signal needs 4
+        response = [1, 2]
+
+        changed_signals, err_code = self.tl.door_open_count_recalculate(response)
+
+        assert err_code == self.tl.rs232Codes.PARTIAL_ERR.name
+        assert changed_signals == []
+
+    def test_door_open_count_recalculate_cumulative_after_restart(self):
+        """
+        Test that counters accumulate correctly after a restart.
+        After restart, previous is non-zero so subsequent calls add read_value + previous.
+        """
+        # First call: counters at [100, 100, 100, 100, 100, 100]
+        response_1 = [100,0,0,0, 100,0,0,0, 100,0,0,0, 100,0,0,0, 100,0,0,0, 100,0,0,0]
+        self.tl.door_open_count_recalculate(response_1)
+        assert self.tl.total_open_door_counters == [100, 100, 100, 100, 100, 100]
+        assert self.tl.previous_open_door_counters == [0, 0, 0, 0, 0, 0]
+
+        # Second call: lift restarted, counters reset to [5, 5, 5, 5, 5, 5]
+        response_2 = [5,0,0,0, 5,0,0,0, 5,0,0,0, 5,0,0,0, 5,0,0,0, 5,0,0,0]
+        self.tl.door_open_count_recalculate(response_2)
+        assert self.tl.previous_open_door_counters == [100, 100, 100, 100, 100, 100]
+        assert self.tl.total_open_door_counters == [105, 105, 105, 105, 105, 105]
+
+        # Third call: counters continue after restart to [20, 20, 20, 20, 20, 20]
+        # No restart: (20 + 100) = 120 >= 105
+        # total = 20 + 100 = 120
+        response_3 = [20,0,0,0, 20,0,0,0, 20,0,0,0, 20,0,0,0, 20,0,0,0, 20,0,0,0]
+        changed_signals, err_code = self.tl.door_open_count_recalculate(response_3)
+        assert err_code == self.tl.rs232Codes.NO_ERR.name
+        assert len(changed_signals) == 6
+        assert self.tl.previous_open_door_counters == [100, 100, 100, 100, 100, 100]
+        assert self.tl.total_open_door_counters == [120, 120, 120, 120, 120, 120]
+
+    def test_door_open_count_recalculate_unpack_error_midway(self):
+        """
+        Test that unpack error on a middle door returns empty list immediately.
+        Response is long enough for doors 1-3 (12 bytes) but too short for door 4 (needs byte 15).
+        Verifies the early-return behavior and that no partial changed_signals leak.
+        """
+        response = [10,0,0,0, 20,0,0,0, 30,0,0,0, 40,0]  # 14 bytes, door 4 needs 16
+
+        changed_signals, err_code = self.tl.door_open_count_recalculate(response)
+
+        assert err_code == self.tl.rs232Codes.PARTIAL_ERR.name
+        assert changed_signals == []
+
+    # ---- update_door_closing_time tests ----
+
+    def test_update_door_closing_time_door_1(self):
+        """
+        Test valid door closing time for door 1.
+        """
+        # DOOR_NUMBER=1 (uint16 LE at byte 0-1), DOOR_CLOSING_TIME=500 (uint16 LE at byte 2-3)
+        # 500 = 0x01F4, LE: [0xF4, 0x01] = [244, 1]
+        response = [1, 0, 244, 1]
+
+        changed_signals, err_code = self.tl.update_door_closing_time(response)
+
+        assert err_code == self.tl.rs232Codes.NO_ERR.name
+        assert len(changed_signals) == 1
+        assert changed_signals[0] == self.tl.params_door_closing_time.DOOR_1_CLOSING_TIME_135.value
+        assert self.tl.database[self.tl.params_door_closing_time.DOOR_1_CLOSING_TIME_135.value].value == '500'
+
+    def test_update_door_closing_time_all_doors(self):
+        """
+        Test valid door closing time for each door (1-6).
+        """
+        from lib.thousand_lib import Params1k_door_closing_time
+        door_params = [
+            Params1k_door_closing_time.DOOR_1_CLOSING_TIME_135,
+            Params1k_door_closing_time.DOOR_2_CLOSING_TIME_135,
+            Params1k_door_closing_time.DOOR_3_CLOSING_TIME_135,
+            Params1k_door_closing_time.DOOR_4_CLOSING_TIME_135,
+            Params1k_door_closing_time.DOOR_5_CLOSING_TIME_135,
+            Params1k_door_closing_time.DOOR_6_CLOSING_TIME_135,
+        ]
+        for door_no in range(1, 7):
+            self.tl = ThousandLib()  # Fresh instance per door
+            # door_no as uint16 LE, closing time 100 as uint16 LE
+            response = [door_no, 0, 100, 0]
+
+            changed_signals, err_code = self.tl.update_door_closing_time(response)
+
+            assert err_code == self.tl.rs232Codes.NO_ERR.name
+            assert len(changed_signals) == 1
+            assert changed_signals[0] == door_params[door_no - 1].value
+            assert self.tl.database[door_params[door_no - 1].value].value == '100'
+
+    def test_update_door_closing_time_invalid_door(self):
+        """
+        Test that invalid door numbers return DATA_ERR.
+        """
+        # Door number 0 (off-by-one edge case from hardware)
+        response = [0, 0, 100, 0]
+        changed_signals, err_code = self.tl.update_door_closing_time(response)
+        assert err_code == self.tl.rs232Codes.DATA_ERR.name
+        assert changed_signals == []
+
+        # Door number 7 (above valid range)
+        response = [7, 0, 100, 0]
+        changed_signals, err_code = self.tl.update_door_closing_time(response)
+        assert err_code == self.tl.rs232Codes.DATA_ERR.name
+        assert changed_signals == []
+
+    def test_update_door_closing_time_duplicate_call(self):
+        """
+        Test that calling twice with same door/time still returns signal in changed_signals.
+        Unlike get_updated_params, update_door_closing_time does not check if the value changed.
+        """
+        response = [1, 0, 100, 0]
+
+        changed_signals_1, err_code = self.tl.update_door_closing_time(response)
+        assert len(changed_signals_1) == 1
+
+        changed_signals_2, err_code = self.tl.update_door_closing_time(response)
+        assert err_code == self.tl.rs232Codes.NO_ERR.name
+        assert len(changed_signals_2) == 1
+        assert changed_signals_2[0] == self.tl.params_door_closing_time.DOOR_1_CLOSING_TIME_135.value
+
+    def test_update_door_closing_time_empty_response(self):
+        """
+        Test that empty response returns empty list with NO_ERR.
+        """
+        response = []
+
+        changed_signals, err_code = self.tl.update_door_closing_time(response)
+
+        assert err_code == self.tl.rs232Codes.NO_ERR.name
+        assert changed_signals == []
+
+    def test_update_door_closing_time_unpack_error_door_number(self):
+        """
+        Test that unpack error on DOOR_NUMBER returns error.
+        """
+        # Response too short for DOOR_NUMBER (needs 2 bytes at byte_start=0)
+        response = [1]
+
+        changed_signals, err_code = self.tl.update_door_closing_time(response)
+
+        assert err_code == self.tl.rs232Codes.PARTIAL_ERR.name
+        assert changed_signals == []
+
+    def test_update_door_closing_time_unpack_error_closing_time(self):
+        """
+        Test that unpack error on DOOR_CLOSING_TIME returns error.
+        """
+        # Response has enough for DOOR_NUMBER but not for DOOR_CLOSING_TIME
+        # DOOR_NUMBER: byte_start=0, byte_size=2 -> needs [0] and [1]
+        # DOOR_CLOSING_TIME: byte_start=2, byte_size=2 -> needs [2] and [3]
+        response = [1, 0]
+
+        changed_signals, err_code = self.tl.update_door_closing_time(response)
+
+        assert err_code == self.tl.rs232Codes.PARTIAL_ERR.name
+        assert changed_signals == []
+
+    # ---- reset methods tests ----
+
+    def test_reset_door_closing_time_params(self):
+        """
+        Test that reset_door_closing_time_params resets params 155-160 to '0'.
+        """
+        # Set values first
+        for signal in self.tl.params_door_closing_time:
+            self.tl.database[signal.value].value = '999'
+
+        self.tl.reset_door_closing_time_params()
+
+        for signal in self.tl.params_door_closing_time:
+            assert self.tl.database[signal.value].value == '0'
+
+    def test_reset_door_closing_time_params_fresh_instance(self):
+        """
+        Test that calling reset on a fresh instance (values are '') does not crash.
+        """
+        self.tl.reset_door_closing_time_params()
+
+        for signal in self.tl.params_door_closing_time:
+            assert self.tl.database[signal.value].value == '0'
+
+    def test_reset_135_params(self):
+        """
+        Test that reset_135_params resets params -1 and -2 to '0'.
+        """
+        # Set values first
+        for signal in self.tl.params_135:
+            self.tl.database[signal.value].value = '42'
+
+        self.tl.reset_135_params()
+
+        for signal in self.tl.params_135:
+            assert self.tl.database[signal.value].value == '0'
+
+    def test_reset_135_params_fresh_instance(self):
+        """
+        Test that calling reset on a fresh instance (values are '') does not crash.
+        """
+        self.tl.reset_135_params()
+
+        for signal in self.tl.params_135:
+            assert self.tl.database[signal.value].value == '0'
+
 
 def set_up_mocked_database():
     database = dict()
