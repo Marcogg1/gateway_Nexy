@@ -6,7 +6,7 @@ import sys
 import time
 from enum import Enum
 from typing import Any, Type
-from _collections_abc import dict_keys
+from collections.abc import KeysView
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)))
 from lib.error_signals import Rs232Code
@@ -158,8 +158,7 @@ class ThousandLib:
 
         return changed_signals, err_code
 
-    #TODO:, rs232handler unittest complains on the "dict_keys[Any, Any] format for some reason, figure out why"
-    def available_params(self) -> Any:#dict_keys[Any, Any]: 
+    def available_params(self) -> KeysView[int]:
         """
         Get list of all available parameters
         :return: lift containing all available params
