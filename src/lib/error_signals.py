@@ -216,3 +216,11 @@ class Rs232Code(Enum):
     VFD_TIMEOUT_ERR = 32
     VFD_NO_PWR_ERR = 33
     VFD_ID_ERR = 34
+
+
+@unique
+class AhlCode(Enum):
+    SOURCE = 'AhlLib'
+    NO_ERR = 0
+    PARAM_NOT_IN_DB = 1
+    PARAM_NOT_SET = 2
