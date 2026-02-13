@@ -13,7 +13,7 @@ from lib.ahl_lib import (
     AhlParamAlarms, AhlParamHardware, AhlParamSoftware,
     AhlParamNetwork, AhlParamAlarmDetails,
 )
-from lib.error_signals import AhlCode
+from lib.error_signals import MbCode
 
 
 class TestAhlLib(unittest.TestCase):
@@ -47,40 +47,40 @@ class TestAhlLib(unittest.TestCase):
         self.ahl.database[0].value = 42
         val, err = self.ahl.get_param(0)
         assert val == 42
-        assert err == AhlCode.NO_ERR.name
+        assert err == MbCode.NO_ERR.name
 
     def test_get_param_not_in_db(self):
         """Nonexistent param_id returns PARAM_NOT_IN_DB."""
         val, err = self.ahl.get_param(99999)
         assert val == -1
-        assert err == AhlCode.PARAM_NOT_IN_DB.name
+        assert err == MbCode.PARAM_NOT_IN_DB.name
 
     def test_get_param_not_set(self):
         """Unread param returns PARAM_NOT_SET."""
         val, err = self.ahl.get_param(0)
         assert val == -1
-        assert err == AhlCode.PARAM_NOT_SET.name
+        assert err == MbCode.PARAM_NOT_SET.name
 
     def test_get_param_value_zero(self):
         """Value 0 is returned correctly, not confused with not-set."""
         self.ahl.set_param(8, 0)
         val, err = self.ahl.get_param(8)
         assert val == 0
-        assert err == AhlCode.NO_ERR.name
+        assert err == MbCode.NO_ERR.name
 
     def test_get_param_value_negative(self):
         """Negative value is returned correctly, even -1."""
         self.ahl.set_param(8, -1)
         val, err = self.ahl.get_param(8)
         assert val == -1
-        assert err == AhlCode.NO_ERR.name
+        assert err == MbCode.NO_ERR.name
 
     def test_get_param_after_set_param(self):
         """Round-trip through public API: set_param then get_param."""
         self.ahl.set_param(8, 750)
         val, err = self.ahl.get_param(8)
         assert val == 750
-        assert err == AhlCode.NO_ERR.name
+        assert err == MbCode.NO_ERR.name
 
     # --- set_param ---
 
@@ -88,7 +88,7 @@ class TestAhlLib(unittest.TestCase):
         """Set value, verify it's stored, returns changed list."""
         changed, err = self.ahl.set_param(8, 500)
         assert changed == [8]
-        assert err == AhlCode.NO_ERR.name
+        assert err == MbCode.NO_ERR.name
         assert self.ahl.database[8].value == 500
 
     def test_set_param_unchanged(self):
@@ -96,27 +96,27 @@ class TestAhlLib(unittest.TestCase):
         self.ahl.set_param(8, 500)
         changed, err = self.ahl.set_param(8, 500)
         assert changed == []
-        assert err == AhlCode.NO_ERR.name
+        assert err == MbCode.NO_ERR.name
 
     def test_set_param_not_in_db(self):
         """Invalid param_id returns PARAM_NOT_IN_DB."""
         changed, err = self.ahl.set_param(99999, 100)
         assert changed == []
-        assert err == AhlCode.PARAM_NOT_IN_DB.name
+        assert err == MbCode.PARAM_NOT_IN_DB.name
 
     def test_set_param_overwrites_previous(self):
         """Setting a different value overwrites and reports changed."""
         self.ahl.set_param(8, 500)
         changed, err = self.ahl.set_param(8, 999)
         assert changed == [8]
-        assert err == AhlCode.NO_ERR.name
+        assert err == MbCode.NO_ERR.name
         assert self.ahl.database[8].value == 999
 
     def test_set_param_value_zero(self):
         """Setting value 0 stores it and counts as a change from None."""
         changed, err = self.ahl.set_param(8, 0)
         assert changed == [8]
-        assert err == AhlCode.NO_ERR.name
+        assert err == MbCode.NO_ERR.name
         assert self.ahl.database[8].value == 0
 
     # --- available_params ---
@@ -183,20 +183,20 @@ class TestAhlLib(unittest.TestCase):
         assert AhlParamNetwork.PARAM_NUM_OF_DCMS.value == 27
         assert AhlParamNetwork.PARAM_REGISTERED_UNITS.value == 112
 
-    # --- AhlCode error enum ---
+    # --- MbCode error enum ---
 
-    def test_ahl_code_enum(self):
+    def test_mb_code_enum(self):
         """Verify error codes exist and have correct values."""
-        assert AhlCode.SOURCE.value == 'AhlLib'
-        assert AhlCode.NO_ERR.value == 0
-        assert AhlCode.PARAM_NOT_IN_DB.value == 1
-        assert AhlCode.PARAM_NOT_SET.value == 2
+        assert MbCode.SOURCE.value == 'ModBusHandler'
+        assert MbCode.NO_ERR.value == 0
+        assert MbCode.PARAM_NOT_IN_DB.value == 25
+        assert MbCode.PARAM_NOT_SET.value == 26
 
     # --- Interface consistency with ThousandLib ---
 
     def test_error_codes_attribute(self):
-        """error_codes attribute exposes the AhlCode enum."""
-        assert self.ahl.error_codes is AhlCode
+        """error_codes attribute exposes the MbCode enum."""
+        assert self.ahl.error_codes is MbCode
         assert self.ahl.error_codes.NO_ERR.name == 'NO_ERR'
 
     def test_param_enum_instance_attributes(self):

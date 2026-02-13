@@ -68,6 +68,8 @@ class MbCode(Enum):
     FILE_HEADER_ERR = 22
     CUSTOM_SPEED_ERR = 23
     FLOOR_LOCK_ERR = 24
+    PARAM_NOT_IN_DB = 25
+    PARAM_NOT_SET = 26
 
 @unique
 class MainCode(Enum):
@@ -216,11 +218,3 @@ class Rs232Code(Enum):
     VFD_TIMEOUT_ERR = 32
     VFD_NO_PWR_ERR = 33
     VFD_ID_ERR = 34
-
-
-@unique
-class AhlCode(Enum):
-    SOURCE = 'AhlLib'
-    NO_ERR = 0
-    PARAM_NOT_IN_DB = 1
-    PARAM_NOT_SET = 2

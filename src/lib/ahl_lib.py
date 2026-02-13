@@ -7,7 +7,7 @@ from typing import Any, Type
 from collections.abc import KeysView
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)))
-from lib.error_signals import AhlCode
+from lib.error_signals import MbCode
 from lib.logging_config import setup_logging, get_logger
 
 # Setup logging at module level
@@ -34,7 +34,7 @@ class AhlLib:
         self.params_network: Type[AhlParamNetwork] = AhlParamNetwork
         self.params_alarm_details: Type[AhlParamAlarmDetails] = AhlParamAlarmDetails
         self.__init_database()
-        self.error_codes = AhlCode
+        self.error_codes = MbCode
 
     def get_param(self, param: int) -> tuple[Any, str]:
         """Return a parameter if it exists in the database.
