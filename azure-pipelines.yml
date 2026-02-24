@@ -7,7 +7,7 @@ jobs:
   steps:
   - task: UsePythonVersion@0
     inputs:
-      versionSpec: '3.14'
+      versionSpec: '3.14.2'
 
   - script: |
       python -m pip install --upgrade pip
