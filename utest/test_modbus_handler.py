@@ -8,13 +8,13 @@ handlers for reset alarms, speed config, and floor locks.
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
-import ctypes
+from unittest.mock import MagicMock, patch
 
 # Add src directory to path
 p = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(p))
 
+# pylint: disable=wrong-import-position,protected-access
 from liftApi.modbus_handler import ModBusHandler, WriteRecordConfig, LogConfig
 from lib.error_signals import MbCode
 
@@ -49,6 +49,7 @@ class TestLogConfig(unittest.TestCase):
         assert config.sizes.log["0x02"] == 16 * 2048
 
 
+# pylint: disable=too-many-public-methods
 class TestModBusHandler(unittest.TestCase):
     """Test suite for ModBusHandler."""
 
