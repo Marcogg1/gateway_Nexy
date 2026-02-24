@@ -10,6 +10,7 @@ Handles serial communication with lift control hardware including:
 
 Communication uses Modbus RTU protocol over RS485 or USB-RS485 adapter.
 """
+# pylint: disable=too-many-lines
 from __future__ import annotations
 
 import ctypes
@@ -28,7 +29,6 @@ from pymodbus.pdu.file_message import WriteFileRecordResponse
 from filemgmt.disk_handler import DiskHandler
 from lib.error_signals import MbCode
 from lib.logging_config import get_logger, setup_logging
-from lib.sync_time_handler import SyncTimeHandler
 from liftApi.modbus_file_record import ReadFileRecord, WriteFileRecord
 
 setup_logging()
@@ -108,6 +108,7 @@ def check_modbus_connection(
         self: ModBusHandler, *args: Any, **kwargs: Any
     ) -> tuple[Any, str, str]:
         """Check connection and execute method."""
+        # pylint: disable=protected-access
         if not self._test_connection():
             logger.error("Modbus connection not available")
             return -1, self.name, MbCode.LINK_ERR.name
@@ -123,6 +124,7 @@ def check_modbus_connection(
     return wrapper
 
 
+# pylint: disable=too-many-instance-attributes
 class ModBusHandler:
     """Handler for Modbus RTU communication with LCM.
 
@@ -181,12 +183,13 @@ class ModBusHandler:
             self.usb_connected = True
         except IndexError:
             logger.warning(
-                f"Could not find Modbus cable '{mb_usb_port}', using RS232"
+                "Could not find Modbus cable '%s', using RS232",
+                mb_usb_port,
             )
             if not self.usb_connected:
                 serial_port = self.rs_port
 
-        logger.info(f"Using port {serial_port}")
+        logger.info("Using port %s", serial_port)
 
         # Setup connection
         # In pymodbus 3.x, use framer instead of method parameter
@@ -207,10 +210,10 @@ class ModBusHandler:
         """
         mb_usb_port = "/dev/serial/by-id/usb-FTDI_USB-RS485_Cable_*"
         try:
-            glob.glob(mb_usb_port)[0]
+            _ = glob.glob(mb_usb_port)[0]
             return True
         except IndexError:
-            logger.error(f"Could not find Modbus cable '{mb_usb_port}'")
+            logger.error("Could not find Modbus cable '%s'", mb_usb_port)
             self._modbus_link = False
             return False
 
@@ -230,14 +233,14 @@ class ModBusHandler:
         if ret[0] != 0:
             return ret
 
-        logger.info(f"Read parameter {par}")
+        logger.info("Read parameter %s", par)
 
         max_tries = 3
         for i in range(max_tries):
             # Read parameter. Assign all exceptions from pymodbus to COM_ERR
             try:
                 response = self._serial_read_param(par[0])
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 response = str(type(e).__name__)
 
             ret = self._validate_read_param_response(response)
@@ -250,7 +253,7 @@ class ModBusHandler:
                 break
 
             logger.warning(
-                f"Modbus error {ret[2]}, try: {i + 1} of {max_tries}"
+                "Modbus error %s, try: %d of %d", ret[2], i + 1, max_tries
             )
 
         return ret
@@ -282,7 +285,7 @@ class ModBusHandler:
         param = args[0]
         value = args[1]
 
-        logger.info(f"Write parameter {param} with value {value}")
+        logger.info("Write parameter %s with value %s", param, value)
 
         # Check if reboot signal
         if param == sw_installation_cmd:
@@ -297,15 +300,15 @@ class ModBusHandler:
             err = self._handle_floor_lock(value)
 
         if err != MbCode.NO_ERR.name:
-            logger.error(f"Failed to set custom parameter. Returned {err}.")
+            logger.error("Failed to set custom parameter. Returned %s.", err)
             return -1, self.name, err
 
         # Check if reset alarms request
         value, err = self._handle_reset_alarms(param, value)
         if err != MbCode.NO_ERR.name:
             logger.error(
-                f"Failed to prepare for write to reset alarms params. "
-                f"Returned {err}"
+                "Failed to prepare for write to reset alarms params. "
+                "Returned %s", err
             )
             return -1, self.name, err
 
@@ -314,8 +317,8 @@ class ModBusHandler:
             # Write parameter. Assign all exceptions from pymodbus to COM_ERR
             try:
                 response = self._serial_write_param(param, value)
-            except Exception as e:
-                logger.error(f"Modbus error: {e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.error("Modbus error: %s", e)
                 response = str(type(e).__name__)
 
             ret = self._validate_write_param_response(response, param)
@@ -323,7 +326,7 @@ class ModBusHandler:
                 break
 
             logger.error(
-                f"Modbus error {ret[2]}, try: {i + 1} of {max_tries}"
+                "Modbus error %s, try: %d of %d", ret[2], i + 1, max_tries
             )
 
         return ret
@@ -350,7 +353,7 @@ class ModBusHandler:
         if log_type[0] in ("0x06", "0x02"):
             return self.generate_trace_log(log_type[0])
 
-        logger.error(f"Log type not recognized: {log_type[0]}")
+        logger.error("Log type not recognized: %s", log_type[0])
         return -1, self.name, MbCode.LOG_TYPE_ERR.name
 
     def generate_trace_log(self, log_type: str = "") -> tuple[Any, str, str]:
@@ -373,8 +376,9 @@ class ModBusHandler:
         Returns:
             Tuple of (filename, handler_name, error_code)
         """
+        # pylint: disable=too-many-branches,too-many-statements,too-many-locals
         if log_type not in self.log.types:
-            logger.error(f"Log type not recognized: {log_type}")
+            logger.error("Log type not recognized: %s", log_type)
             return -1, self.name, MbCode.LOG_TYPE_ERR.name
 
         # Set variables
@@ -401,6 +405,8 @@ class ModBusHandler:
         if log_type == "0x02":
             file_type = 0x03
         elif log_type == "0x06":
+            file_type = 0x00
+        else:
             file_type = 0x00
 
         # file_number[0:1] is called 'unit' in LCM
@@ -441,7 +447,7 @@ class ModBusHandler:
                     response, data_tmp = ReadFileRecord.run(
                         self.client, request, exp_rsp_len[record_number]
                     )
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-exception-caught
                     logger.error(e)
                     logger.info("Trying again...")
                     err_cnt += 1
@@ -475,7 +481,7 @@ class ModBusHandler:
                 # Increment to next record number
                 record_number += 1
 
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 logger.error(e)
                 logger.info("Trying again...")
                 record_number = 0
@@ -483,7 +489,7 @@ class ModBusHandler:
                 continue
 
         if err_cnt >= self.log.err_cnt_max:
-            logger.error(f"Too many errors encountered {err_cnt}")
+            logger.error("Too many errors encountered %d", err_cnt)
             if last_err == MbCode.NO_ERR.name:
                 last_err = MbCode.LOG_ERR_CNT.name
             return -1, self.name, last_err
@@ -542,13 +548,13 @@ class ModBusHandler:
         max_tries = 20
 
         while record_number < len(data_list) and error_counter < max_tries:
-            logger.info(f"Write data, record number {record_number}")
+            logger.info("Write data, record number %d", record_number)
 
             try:
                 write_response = self._write_data(
                     record_number, data_list[record_number]
                 )
-            except Exception as error:
+            except Exception as error:  # pylint: disable=broad-exception-caught
                 logger.error("Exception during writing data")
                 logger.error(error)
                 error_counter += 1
@@ -558,12 +564,11 @@ class ModBusHandler:
             if not response_ok:
                 error_counter += 1
                 continue
-            else:
-                record_number += 1
-                error_counter = 0
+            record_number += 1
+            error_counter = 0
 
         if error_counter > 0:
-            logger.error(f"Error count: {error_counter}")
+            logger.error("Error count: %d", error_counter)
             return 1, self.name, MbCode.FILE_TRANSFER_ERR.name
 
         return 0, self.name, MbCode.NO_ERR.name
@@ -583,7 +588,9 @@ class ModBusHandler:
         """
         if not isinstance(args, list) or len(args) != args_len:
             logger.error(
-                f"Not list or number of input arguments {args} != {args_len}"
+                "Not list or number of input arguments %s != %s",
+                args,
+                args_len,
             )
             return -1, self.name, MbCode.ARG_ERR.name
 
@@ -614,11 +621,12 @@ class ModBusHandler:
         Returns:
             Tuple of (value, handler_name, error_code)
         """
+        # pylint: disable=too-many-return-statements
         if isinstance(response, str):
             logger.error("Exception, modbus communication error")
             return -1, self.name, MbCode.COM_ERR.name
 
-        elif not (
+        if not (
             hasattr(response, "registers")
             and hasattr(response, "isError")
             and hasattr(response, "function_code")
@@ -626,27 +634,26 @@ class ModBusHandler:
             logger.error("Invalid response, modbus communication error")
             return -1, self.name, MbCode.COM_ERR.name
 
-        elif response.isError():
+        if response.isError():
             logger.error("Modbus communication error")
             return response.function_code, self.name, MbCode.COM_ERR.name
 
-        elif len(response.registers) != 2:
+        if len(response.registers) != 2:
             logger.error("Number of return registers incorrect")
             return -1, self.name, MbCode.REG_ERR.name
 
-        else:
-            dead = int("0xDEAD", 16)
-            if (
-                response.registers[0] == dead
-                and response.registers[1] == dead
-            ):
-                logger.error("LCM returned error value")
-                return -1, self.name, MbCode.LCM_ERR.name
+        dead = int("0xDEAD", 16)
+        if (
+            response.registers[0] == dead
+            and response.registers[1] == dead
+        ):
+            logger.error("LCM returned error value")
+            return -1, self.name, MbCode.LCM_ERR.name
 
-            value = (response.registers[0] << 16) + response.registers[1]
-            value = ctypes.c_long(value).value
+        value = (response.registers[0] << 16) + response.registers[1]
+        value = ctypes.c_long(value).value
 
-            return value, self.name, MbCode.NO_ERR.name
+        return value, self.name, MbCode.NO_ERR.name
 
     def _validate_write_param_response(
         self, response: Any, param: str
@@ -661,48 +668,48 @@ class ModBusHandler:
         Returns:
             Tuple of (status, handler_name, error_code)
         """
+        # pylint: disable=too-many-branches,too-many-statements,too-many-return-statements
         if isinstance(response, str):
             logger.error("Exception, modbus communication error")
             return -1, self.name, MbCode.COM_ERR.name
 
-        elif not (
+        if not (
             hasattr(response, "isError") and hasattr(response, "function_code")
         ):
             logger.error("Invalid response, modbus communication error")
             return -1, self.name, MbCode.COM_ERR.name
 
-        elif response.isError():
+        if response.isError():
             logger.error("Modbus communication error")
             return -1, self.name, MbCode.COM_ERR.name
 
-        else:
-            # From code documentation `register_write_message.py`
-            # "The normal response returns the function code, starting address,
-            # and quantity of registers written."
-            response = str(response)
+        # From code documentation `register_write_message.py`
+        # "The normal response returns the function code, starting address,
+        # and quantity of registers written."
+        response = str(response)
 
-            if "WriteMultipleRegisterResponse" not in response:
-                logger.error(
-                    "Keyword missing. Response could not be decoded"
-                )
-                return -1, self.name, MbCode.COM_ERR.name
+        if "WriteMultipleRegisterResponse" not in response:
+            logger.error(
+                "Keyword missing. Response could not be decoded"
+            )
+            return -1, self.name, MbCode.COM_ERR.name
 
-            try:
-                rec_param = str(response).split("(")[1].split(",")[0]
-                rec_count = str(response).split(")")[0].split(",")[1]
-            except Exception:
-                logger.error("Parsing return values failed")
-                return -1, self.name, MbCode.COM_ERR.name
+        try:
+            rec_param = str(response).split("(")[1].split(",")[0]
+            rec_count = str(response).split(")", maxsplit=1)[0].split(",")[1]
+        except Exception:  # pylint: disable=broad-exception-caught
+            logger.error("Parsing return values failed")
+            return -1, self.name, MbCode.COM_ERR.name
 
-            if (
-                str(param)
-                != str(self._convert_param_addr(rec_param, dir="rec"))
-                or rec_count != "2"
-            ):
-                logger.error("Response could not be decoded")
-                return -1, self.name, MbCode.COM_ERR.name
+        if (
+            str(param)
+            != str(self._convert_param_addr(rec_param, direction="rec"))
+            or rec_count != "2"
+        ):
+            logger.error("Response could not be decoded")
+            return -1, self.name, MbCode.COM_ERR.name
 
-            return 0, self.name, MbCode.NO_ERR.name
+        return 0, self.name, MbCode.NO_ERR.name
 
     def _validate_read_file_response(
         self,
@@ -723,6 +730,7 @@ class ModBusHandler:
         Returns:
             Tuple of (valid, data_index, error_code)
         """
+        # pylint: disable=too-many-branches,too-many-statements
         valid = True
         err = MbCode.NO_ERR.name
         idx = 0
@@ -772,8 +780,9 @@ class ModBusHandler:
 
             if data_tmp[2] != data_len:
                 logger.warning(
-                    f"Expected length not matched in header "
-                    f"{data_tmp[2]} - {data_len}"
+                    "Expected length not matched in header %s - %s",
+                    data_tmp[2],
+                    data_len,
                 )
                 if valid:
                     err = MbCode.LOG_LD_PARSE_ERR.name
@@ -781,15 +790,16 @@ class ModBusHandler:
 
         if data_len != exp_len - self.log.sizes.header - self.log.sizes.crc:
             logger.warning(
-                f"Record length does not match expected "
-                f"{data_len} - {exp_len}"
+                "Record length does not match expected %s - %s",
+                data_len,
+                exp_len,
             )
             if valid:
                 err = MbCode.LOG_REC_LEN_ERR.name
                 valid = False
 
         if response.isError():
-            logger.warning(f"Error from modbus response {response}")
+            logger.warning("Error from modbus response %s", response)
             if valid:
                 err = MbCode.LOG_RSP_ERR.name
                 valid = False
@@ -812,8 +822,8 @@ class ModBusHandler:
 
             else:
                 logger.warning(
-                    f'Keyword "{needle.decode("utf-8")}" not found '
-                    "in data. Trying again..."
+                    'Keyword "%s" not found in data. Trying again...',
+                    needle.decode("utf-8"),
                 )
                 if valid:
                     err = MbCode.LOG_FNAME_ERR.name
@@ -846,35 +856,35 @@ class ModBusHandler:
 
             # Make an attempt to retrieve LCM version to include in filename
             version_str = ""
-            version, err_src, err_code = self.read_parameter(
+            version, _, err_code = self.read_parameter(
                 [self.param_dict["LCM_SOFTWARE_VERSION"]]
             )
             if err_code == MbCode.NO_ERR.name:
                 if isinstance(version, int):
-                    version_str = "{}.{}.{}".format(
-                        (version >> 16) & 0xFF,
-                        (version >> 8) & 0xFF,
-                        version & 0xFF,
+                    version_str = (
+                        f"{(version >> 16) & 0xFF}."
+                        f"{(version >> 8) & 0xFF}."
+                        f"{version & 0xFF}"
                     )
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-            fname_ret = "{0}_v{1}_{2}.{3}".format(
-                fname_ret.split(".")[0],
-                version_str,
-                timestamp,
-                fname_ret.split(".")[1],
+            fname_ret = (
+                f"{fname_ret.split('.')[0]}"
+                f"_v{version_str}"
+                f"_{timestamp}"
+                f".{fname_ret.split('.')[1]}"
             )
 
             fname_fullpath = os.path.join(fname_dirs, fname_ret)
-            logger.info(f"Saving log file to {fname_fullpath}")
+            logger.info("Saving log file to %s", fname_fullpath)
 
             os.makedirs(fname_dirs, exist_ok=True)
 
-            with open(fname_fullpath, wtype) as f:
+            with open(fname_fullpath, wtype) as f:  # pylint: disable=unspecified-encoding
                 f.write(data)
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logger.error(e)
             logger.error("Failed to save log file")
             return False, fname_ret
@@ -904,8 +914,9 @@ class ModBusHandler:
                         self.write_record.max_write_record_length
                     )
                 logger.info(
-                    f"UP '{file_path}' divided into "
-                    f"{len(data_list)} record numbers"
+                    "UP '%s' divided into %d record numbers",
+                    file_path,
+                    len(data_list),
                 )
 
         except FileNotFoundError as error:
@@ -913,7 +924,7 @@ class ModBusHandler:
             return None, MbCode.FILE_NOT_FOUND.name
 
         if not data_list:
-            logger.error(f"{file_path} is empty")
+            logger.error("%s is empty", file_path)
             return None, MbCode.FILE_EMPTY.name
 
         return data_list, MbCode.NO_ERR.name
@@ -1004,13 +1015,15 @@ class ModBusHandler:
             <= len(filename)
             <= maximal_filename_length
         ):
-            logger.error(f"UP filename '{filename}' length is wrong")
+            logger.error("UP filename '%s' length is wrong", filename)
             return False
 
         if not filename.lower().endswith(file_extension):
             logger.error(
-                f"UP filename '{filename}' does not have correct "
-                f"file extension ('{file_extension}')"
+                "UP filename '%s' does not have correct "
+                "file extension ('%s')",
+                filename,
+                file_extension,
             )
             return False
 
@@ -1039,35 +1052,35 @@ class ModBusHandler:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
-        except Exception as error:
-            logger.error(f"Failed to hex dump UP file '{file_path}'")
+        except Exception as error:  # pylint: disable=broad-exception-caught
+            logger.error("Failed to hex dump UP file '%s'", file_path)
             logger.error(error)
             return False
 
         string_to_find = "aritco"
         try:
             standard_out = process.stdout.decode("latin-1")
-        except Exception as error:
+        except Exception as error:  # pylint: disable=broad-exception-caught
             logger.error("Failed to decode output from hex dump of UP header")
             logger.error(error)
             return False
 
         if string_to_find not in standard_out:
-            logger.error(f"Could not find {string_to_find} in UP header")
+            logger.error("Could not find %s in UP header", string_to_find)
             if standard_out:
                 logger.error(standard_out)
             try:
                 error_out = process.stderr.decode("latin-1")
                 if error_out:
                     logger.error(error_out)
-            except Exception as error:
+            except Exception as error:  # pylint: disable=broad-exception-caught
                 logger.error(error)
             return False
 
         logger.info("Header in UP file is correct")
         return True
 
-    def _convert_param_addr(self, param: str | int, dir: str = "send") -> int:
+    def _convert_param_addr(self, param: str | int, direction: str = "send") -> int:
         """
         Convert between LCM and Modbus parameter addressing.
 
@@ -1075,7 +1088,7 @@ class ModBusHandler:
 
         Args:
             param: Parameter address as string or int
-            dir: 'send' to multiply by 2, 'rec' to divide by 2
+            direction: 'send' to multiply by 2, 'rec' to divide by 2
 
         Returns:
             Converted parameter address
@@ -1091,24 +1104,24 @@ class ModBusHandler:
             )
             raise ValueError
 
-        result: int
+        addr_result: int
         try:
-            if dir == "send":
-                result = 2 * int(param)
-            elif dir == "rec":
-                result = int(int(param) / 2)
+            if direction == "send":
+                addr_result = 2 * int(param)
+            elif direction == "rec":
+                addr_result = int(int(param) / 2)
             else:
-                result = int(param)
+                addr_result = int(param)
 
-        except (ValueError, TypeError):
+        except (ValueError, TypeError) as exc:
             logger.error("Failed to convert address")
-            raise ValueError
+            raise ValueError from exc
 
-        if result < 0:
+        if addr_result < 0:
             logger.error("Cannot convert non-negative addresses")
             raise ValueError
 
-        return result
+        return addr_result
 
     def _pack_value(self, val: str | int) -> list[int]:
         """
@@ -1132,11 +1145,11 @@ class ModBusHandler:
                 val = int(val)
 
         except ValueError as e:
-            logger.error(f"Cannot pack value {e}")
+            logger.error("Cannot pack value %s", e)
             raise ValueError from e
 
         except TypeError as e:
-            logger.error(f"Cannot pack value. {e}")
+            logger.error("Cannot pack value. %s.", e)
             raise TypeError from e
 
         if val >= (1 << 32) or val < -(1 << 32):
@@ -1211,7 +1224,7 @@ class ModBusHandler:
         ]
 
         if param in reset_alarm_params:
-            version, err_src, err_code = self.read_parameter(
+            version, _, err_code = self.read_parameter(
                 [self.param_dict["LCM_SOFTWARE_VERSION"]]
             )
 
@@ -1226,8 +1239,9 @@ class ModBusHandler:
 
             if version <= lcm_sw_version_break:
                 logger.info(
-                    f"Hotfix in RESET_ALARM for LCM version "
-                    f"{version} <= {lcm_sw_version_break}"
+                    "Hotfix in RESET_ALARM for LCM version %s <= %s",
+                    version,
+                    lcm_sw_version_break,
                 )
                 try:
                     # Bitshift the value (SW-2905)
@@ -1239,7 +1253,7 @@ class ModBusHandler:
                     logger.error(e)
                     err = MbCode.ARG_INT_ERR.name
 
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-exception-caught
                     logger.error("Fatal error in handling of reset alarms value")
                     logger.error(e)
                     err = MbCode.ARG_ERR.name
@@ -1269,11 +1283,11 @@ class ModBusHandler:
             cmd = "sync && journalctl --rotate && journalctl --sync"
 
             try:
-                p = subprocess.Popen(cmd, shell=True)
-                p.wait(timeout=30)
+                with subprocess.Popen(cmd, shell=True) as p:
+                    p.wait(timeout=30)
                 logger.info("Sync complete")
-            except Exception as e:
-                logger.error(f"{e}")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                logger.error("%s", e)
 
     def _handle_speed_config(self, value: str) -> str:
         """
@@ -1287,22 +1301,22 @@ class ModBusHandler:
         Returns:
             Error code
         """
-        OSM_speed_parameter = 359
-        OSM_support = 300
+        osm_speed_parameter = 359
+        osm_support = 300
         min_custom_speed = 150
         max_custom_speed = 300
 
-        ret = self.read_parameter([str(OSM_speed_parameter)])
+        ret = self.read_parameter([str(osm_speed_parameter)])
         if ret[2] != MbCode.NO_ERR.name:
             logger.error(
                 "Failed to read OSM speed param, not setting custom speed"
             )
             return ret[2]
 
-        if ret[0] != OSM_support:
+        if ret[0] != osm_support:
             logger.error(
-                f"Not supported OSM speed: {ret[0]}, "
-                f"not setting custom speed"
+                "Not supported OSM speed: %s, not setting custom speed",
+                ret[0],
             )
             return MbCode.CUSTOM_SPEED_ERR.name
 
@@ -1310,9 +1324,11 @@ class ModBusHandler:
         new_lift_speed = int(value)
         if new_lift_speed not in range(min_custom_speed, max_custom_speed + 1):
             logger.error(
-                f"Custom speed value: {new_lift_speed} is not in range "
-                f"[{min_custom_speed}, {max_custom_speed}]. "
-                f"Not setting this custom speed."
+                "Custom speed value: %s is not in range [%s, %s]. "
+                "Not setting this custom speed.",
+                new_lift_speed,
+                min_custom_speed,
+                max_custom_speed,
             )
             return MbCode.CUSTOM_SPEED_ERR.name
 
@@ -1350,8 +1366,9 @@ class ModBusHandler:
 
         if (fire_floor & value_int) > 0:
             logger.error(
-                f"Fire floor ({ret[0]}) cannot be locked. "
-                f"Rejecting lock request: {value}"
+                "Fire floor (%s) cannot be locked. Rejecting lock request: %s",
+                ret[0],
+                value,
             )
             return MbCode.FLOOR_LOCK_ERR.name
 
@@ -1373,8 +1390,8 @@ if __name__ == "__main__":
         elif sys.argv[1].lower() == "log":
             mb.generate_trace_log("0x06")
         else:
-            ret = mb.read_parameter([int(sys.argv[1])])
-            print(ret)
+            result = mb.read_parameter([int(sys.argv[1])])
+            print(result)
     elif len(sys.argv) == 3:
-        ret = mb.write_parameter([int(sys.argv[1]), int(sys.argv[2])])
-        print(ret)
+        result = mb.write_parameter([int(sys.argv[1]), int(sys.argv[2])])
+        print(result)

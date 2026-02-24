@@ -126,12 +126,12 @@ class TestModBusHandler(unittest.TestCase):
 
     def test_convert_param_addr_send(self) -> None:
         """Test parameter address conversion for sending."""
-        converted = self.handler._convert_param_addr("100", dir="send")
+        converted = self.handler._convert_param_addr("100", direction="send")
         assert converted == 200
 
     def test_convert_param_addr_receive(self) -> None:
         """Test parameter address conversion for receiving."""
-        converted = self.handler._convert_param_addr("200", dir="rec")
+        converted = self.handler._convert_param_addr("200", direction="rec")
         assert converted == 100
 
     def test_convert_param_addr_invalid_float(self) -> None:
