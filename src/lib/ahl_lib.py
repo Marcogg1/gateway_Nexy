@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 
 
 class AhlLib:
-    """Database and functionality for AHL (Aritco Hybrid Lift) series parameters."""
+    """Database and functionality for AHL (Aritco Home Lift) series parameters."""
 
     def __init__(self) -> None:
         self.name: str = 'AhlLib'
