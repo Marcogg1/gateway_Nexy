@@ -218,3 +218,12 @@ class Rs232Code(Enum):
     VFD_TIMEOUT_ERR = 32
     VFD_NO_PWR_ERR = 33
     VFD_ID_ERR = 34
+
+
+@unique
+class HbCode(Enum):
+    SOURCE = 'HeartbeatHandler'
+    NO_ERR = 0
+    SEND_EVENT_ERR = 1
+    REPORT_PROPERTY_ERR = 2
+    INTERVAL_READ_ERR = 3
