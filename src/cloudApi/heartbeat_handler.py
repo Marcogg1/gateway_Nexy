@@ -58,8 +58,11 @@ class HeartbeatHandler:
             logger.error(f"Heartbeat send failed: {e}", exc_info=True)
 
         if self._first_heartbeat:
-            await self._report_first_heartbeat_metadata()
-            self._first_heartbeat = False
+            try:
+                await self._report_first_heartbeat_metadata()
+                self._first_heartbeat = False
+            except Exception as e:
+                logger.error(f"Failed to report first heartbeat metadata: {e}", exc_info=True)
 
     async def _report_first_heartbeat_metadata(self) -> None:
         """Report gateway metadata on first heartbeat via twin properties."""
@@ -70,12 +73,9 @@ class HeartbeatHandler:
             "ca.softwareVersion": "TODO",
             "gw.wifi": "TODO",
         }
-        try:
-            for key, value in metadata.items():
-                await self.reporter.report_property(key, value)
-            logger.info("First heartbeat metadata reported")
-        except Exception as e:
-            logger.error(f"Failed to report first heartbeat metadata: {e}", exc_info=True)
+        for key, value in metadata.items():
+            await self.reporter.report_property(key, value)
+        logger.info("First heartbeat metadata reported")
 
     def get_interval(self) -> int:
         """Get heartbeat interval from desired properties, or default.
@@ -91,7 +91,13 @@ class HeartbeatHandler:
             intervals = self.desired_handler.desired_properties.get("intervals", {})
             value = intervals.get("cloudAgentHeartbeat")
             if value is not None:
-                return int(value)
+                interval = int(value)
+                if interval > 0:
+                    return interval
+                logger.warning(
+                    f"Heartbeat interval {interval}s is not positive, "
+                    f"using default {DEFAULT_HEARTBEAT_INTERVAL}s"
+                )
         except (ValueError, TypeError, AttributeError):
             logger.warning(
                 f"Invalid heartbeat interval in desired properties, "

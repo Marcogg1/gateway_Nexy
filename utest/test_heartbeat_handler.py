@@ -103,6 +103,39 @@ class TestHeartbeatHandler(unittest.TestCase):
         # Should not raise
         await self.handler.send_heartbeat()
 
+    async def test_interval_zero_falls_back_to_default(self):
+        """Zero interval falls back to default to prevent tight loop."""
+        self.mock_desired_handler.desired_properties = {
+            "intervals": {"cloudAgentHeartbeat": "0"}
+        }
+        interval = self.handler.get_interval()
+        self.assertEqual(interval, DEFAULT_HEARTBEAT_INTERVAL)
+
+    async def test_interval_negative_falls_back_to_default(self):
+        """Negative interval falls back to default."""
+        self.mock_desired_handler.desired_properties = {
+            "intervals": {"cloudAgentHeartbeat": "-5"}
+        }
+        interval = self.handler.get_interval()
+        self.assertEqual(interval, DEFAULT_HEARTBEAT_INTERVAL)
+
+    async def test_metadata_retried_if_reporting_fails(self):
+        """If metadata reporting fails, it should be retried on next heartbeat."""
+        self.mock_reporter.report_property = AsyncMock(
+            side_effect=Exception("Twin update failed")
+        )
+
+        await self.handler.send_heartbeat()
+        # _first_heartbeat should still be True since reporting failed
+        self.assertTrue(self.handler._first_heartbeat)
+
+        # Second beat should retry metadata
+        self.mock_reporter.report_property = AsyncMock()
+        await self.handler.send_heartbeat()
+
+        # Now metadata should have been reported
+        self.assertFalse(self.handler._first_heartbeat)
+
     async def test_get_signal_strength_returns_stub(self):
         """Signal strength is stubbed as N/A."""
         result = self.handler.get_signal_strength()
