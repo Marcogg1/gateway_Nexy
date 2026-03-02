@@ -154,6 +154,45 @@ class TestDeviceTwinDesiredHandler(unittest.IsolatedAsyncioTestCase):
             1
         )
 
+    async def test_create_no_desired_key_defaults_to_empty(self):
+        device_client = MagicMock()
+        device_client.get_twin = AsyncMock(return_value={})
+
+        handler = await DeviceTwinDesiredHandler.create(device_client)
+
+        self.assertEqual(handler.desired_properties, {})
+
+    async def test_create_raises_when_get_twin_fails(self):
+        device_client = MagicMock()
+        device_client.get_twin = AsyncMock(side_effect=Exception("connection failed"))
+
+        with self.assertRaises(Exception):
+            await DeviceTwinDesiredHandler.create(device_client)
+
+    async def test_listen_for_desired_updates_processes_multiple_patches(self):
+        device_client = MagicMock()
+        device_client.get_twin = AsyncMock(return_value={"desired": {}})
+        device_client.receive_twin_desired_properties_patch = AsyncMock(
+            side_effect=[{"mode": "auto"}, {"mode": "manual"}, asyncio.CancelledError()]
+        )
+
+        handler = await DeviceTwinDesiredHandler.create(device_client)
+        with self.assertRaises(asyncio.CancelledError):
+            await handler.listen_for_desired_updates()
+
+        self.assertEqual(device_client.receive_twin_desired_properties_patch.await_count, 3)
+
+    async def test_listen_for_desired_updates_propagates_exception(self):
+        device_client = MagicMock()
+        device_client.get_twin = AsyncMock(return_value={"desired": {}})
+        device_client.receive_twin_desired_properties_patch = AsyncMock(
+            side_effect=Exception("connection lost")
+        )
+
+        handler = await DeviceTwinDesiredHandler.create(device_client)
+        with self.assertRaises(Exception):
+            await handler.listen_for_desired_updates()
+
 
 class TestDeviceTwinReporter(unittest.IsolatedAsyncioTestCase):
     async def test_report_property_nested_dict(self):
