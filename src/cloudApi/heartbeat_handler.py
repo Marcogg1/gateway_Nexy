@@ -6,6 +6,7 @@ from cloudApi.event_sender import EventSender
 from cloudApi.device_twin_reported import DeviceTwinReporter
 from cloudApi.device_twin_desired_handler import DeviceTwinDesiredHandler
 from lib.logging_config import get_logger
+from lib.error_signals import HbCode
 
 logger = get_logger(__name__)
 
@@ -55,14 +56,14 @@ class HeartbeatHandler:
             await self.event_sender.send_event(payload)
             logger.info("Heartbeat sent")
         except Exception as e:
-            logger.error(f"Heartbeat send failed: {e}", exc_info=True)
+            logger.error(f"{HbCode.SOURCE.value}: {HbCode.SEND_EVENT_ERR.name} - {e}", exc_info=True)
 
         if self._first_heartbeat:
             try:
                 await self._report_first_heartbeat_metadata()
                 self._first_heartbeat = False
             except Exception as e:
-                logger.error(f"Failed to report first heartbeat metadata: {e}", exc_info=True)
+                logger.error(f"{HbCode.SOURCE.value}: {HbCode.REPORT_PROPERTY_ERR.name} - {e}", exc_info=True)
 
     async def _report_first_heartbeat_metadata(self) -> None:
         """Report gateway metadata on first heartbeat via twin properties."""
@@ -100,8 +101,8 @@ class HeartbeatHandler:
                 )
         except (ValueError, TypeError, AttributeError):
             logger.warning(
-                f"Invalid heartbeat interval in desired properties, "
-                f"using default {DEFAULT_HEARTBEAT_INTERVAL}s"
+                f"{HbCode.SOURCE.value}: {HbCode.INTERVAL_READ_ERR.name} - "
+                f"Invalid heartbeat interval, using default {DEFAULT_HEARTBEAT_INTERVAL}s"
             )
         return DEFAULT_HEARTBEAT_INTERVAL
 
