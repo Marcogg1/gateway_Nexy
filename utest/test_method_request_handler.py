@@ -81,12 +81,13 @@ class TestMethodRequestHandler(unittest.TestCase):
             return args[1], args[2]
 
     async def test_known_methods_return_200(self):
-        """All 23 known DDM commands return status 200 with result True."""
+        """All 23 known DDM commands return status 200, result True, and correct message."""
         for method_name in KNOWN_METHODS:
             with self.subTest(method=method_name):
                 status, response_payload = await self._run_one_request(method_name)
                 self.assertEqual(status, 200)
                 self.assertTrue(response_payload["result"])
+                self.assertEqual(response_payload["message"], f"{method_name} method executed")
 
     async def test_unknown_method_returns_404(self):
         """Unknown method name returns status 404 with result False."""
@@ -115,6 +116,10 @@ class TestMethodRequestHandler(unittest.TestCase):
         )
         self.assertEqual(status, 200)
         self.assertTrue(response_payload["result"])
+
+    def test_dispatch_table_matched_known_methods(self):
+        """Dispatch table keys match KNOWN_METHODS exactly — no drift in either direction."""
+        self.assertEqual(set(self.handler._dispatch.keys()), set(KNOWN_METHODS))
 
 
 def async_test(coro):
