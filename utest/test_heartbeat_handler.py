@@ -7,7 +7,7 @@ import inspect
 import os
 import sys
 import unittest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 p = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "src"))
 sys.path.append(p)

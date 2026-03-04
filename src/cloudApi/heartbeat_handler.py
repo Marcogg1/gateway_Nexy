@@ -96,6 +96,7 @@ class HeartbeatHandler:
                 if interval > 0:
                     return interval
                 logger.warning(
+                    f"{HbCode.SOURCE.value}: {HbCode.INTERVAL_READ_ERR.name} - "
                     f"Heartbeat interval {interval}s is not positive, "
                     f"using default {DEFAULT_HEARTBEAT_INTERVAL}s"
                 )
