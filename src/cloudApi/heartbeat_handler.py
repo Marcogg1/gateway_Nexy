@@ -110,10 +110,18 @@ class HeartbeatHandler:
     def get_uptime(self) -> int:
         """Get system uptime in seconds.
 
+        Reads from ``/proc/uptime`` on Linux. Falls back to
+        ``time.monotonic()`` if unavailable (e.g. during development
+        on Windows/macOS).
+
         Returns:
             System uptime as integer seconds.
         """
-        return int(time.monotonic())
+        try:
+            with open("/proc/uptime") as f:
+                return int(float(f.read().split()[0]))
+        except OSError:
+            return int(time.monotonic())
 
     def get_signal_strength(self) -> str:
         """Get signal strength (RSSI).

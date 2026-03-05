@@ -7,7 +7,7 @@ import inspect
 import os
 import sys
 import unittest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch, mock_open
 
 p = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "src"))
 sys.path.append(p)
@@ -144,6 +144,19 @@ class TestHeartbeatHandler(unittest.TestCase):
     async def test_get_uptime_returns_int(self):
         """Uptime returns an integer."""
         result = self.handler.get_uptime()
+        self.assertIsInstance(result, int)
+        self.assertGreaterEqual(result, 0)
+
+    async def test_get_uptime_reads_proc_uptime(self):
+        """Uptime reads from /proc/uptime when available."""
+        with patch("builtins.open", mock_open(read_data="12345.67 98765.43")):
+            result = self.handler.get_uptime()
+        self.assertEqual(result, 12345)
+
+    async def test_get_uptime_falls_back_to_monotonic(self):
+        """Uptime falls back to time.monotonic() when /proc/uptime unavailable."""
+        with patch("builtins.open", side_effect=OSError):
+            result = self.handler.get_uptime()
         self.assertIsInstance(result, int)
         self.assertGreaterEqual(result, 0)
 
