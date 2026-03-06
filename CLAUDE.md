@@ -22,16 +22,16 @@ pip install -r requirements_host.txt
 
 **Then run tests:**
 ```bash
-# Run all tests
+# Run all tests (pytest — preferred for async tests)
+pytest utest/
+
+# Run all tests (unittest — also works for non-async tests)
 python -m unittest discover utest
 
 # Run specific test file
-python utest/test_blob_upload_handler.py
+pytest utest/test_method_request_handler.py -v
 
-# Run with verbose output
-python -m utest.test_blob_upload_handler -v
-
-# Run single test class
+# Run single test class (unittest style)
 python -m unittest utest.test_disk_handler.TestDiskHandler
 ```
 
@@ -161,17 +161,29 @@ The blob upload implementation demonstrates the migration pattern:
 
 ## Testing
 
-Tests use Python's `unittest` framework with async test support:
+New tests use `pytest` with `pytest-asyncio` (`asyncio_mode = auto` in `pytest.ini`):
+```python
+import pytest
+from unittest.mock import AsyncMock, MagicMock
+
+@pytest.fixture
+def mock_client():
+    client = MagicMock()
+    client.some_async_method = AsyncMock()
+    return client
+
+async def test_something(mock_client):
+    # async tests work automatically — no decorator needed
+    result = await mock_client.some_async_method()
+    assert result is not None
+```
+
+Older tests use `unittest` with a manual async wrapper:
 ```python
 def async_test(coro):
     def wrapper(*args, **kwargs):
         return asyncio.run(coro(*args, **kwargs))
     return wrapper
-
-# Apply to async test methods
-for name in dir(TestClass):
-    if name.startswith('test_') and asyncio.iscoroutinefunction(...):
-        setattr(TestClass, name, async_test(getattr(TestClass, name)))
 ```
 
 ## Important Context

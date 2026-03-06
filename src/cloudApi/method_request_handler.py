@@ -1,6 +1,8 @@
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from azure.iot.device import MethodResponse
 from azure.iot.device.custom_typing import JSONSerializable
+
+_Handler = Callable[[JSONSerializable], Awaitable[tuple[JSONSerializable, int]]]
 from azure.iot.device.aio import IoTHubDeviceClient
 from lib.logging_config import get_logger
 
@@ -23,7 +25,7 @@ class MethodRequestHandler:
                 method requests and send responses.
         """
         self.device_client = device_client
-        self._dispatch: dict[str, Callable] = {
+        self._dispatch: dict[str, _Handler] = {
             "gw.read.hostname":            self._gw_read_hostname,
             "gw.read.hw-version":          self._gw_read_hw_version,
             "gw.read.bom-revision":        self._gw_read_bom_revision,
@@ -58,20 +60,30 @@ class MethodRequestHandler:
         """
         while True:
             method_request = await self.device_client.receive_method_request()
-            logger.info(f"Received method request: {method_request.name}")
+            logger.info("Received method request: %s", method_request.name)
 
-            handler = self._dispatch.get(method_request.name)
-            if handler:
-                response_payload, status = await handler(method_request.payload)
-            else:
-                logger.warning(f"Unknown method: {method_request.name}")
-                response_payload = {"result": False, "message": "Unknown method"}
-                status = 404
+            try:
+                handler = self._dispatch.get(method_request.name)
+                if handler:
+                    response_payload, status = await handler(method_request.payload)
+                else:
+                    logger.warning("Unknown method: %s", method_request.name)
+                    response_payload = {"result": False, "message": "Unknown method"}
+                    status = 404
 
-            method_response = MethodResponse.create_from_method_request(
-                method_request, status, response_payload)
-            await self.device_client.send_method_response(method_response)
-            logger.info(f"Sent method response for: {method_request.name}")
+                method_response = MethodResponse.create_from_method_request(
+                    method_request, status, response_payload)
+                await self.device_client.send_method_response(method_response)
+                logger.info("Sent method response for: %s", method_request.name)
+
+            except Exception:
+                logger.exception("Unhandled error dispatching method: %s", method_request.name)
+                try:
+                    error_response = MethodResponse.create_from_method_request(
+                        method_request, 500, {"result": False, "message": "Internal error"})
+                    await self.device_client.send_method_response(error_response)
+                except Exception:
+                    logger.exception("Failed to send error response for: %s", method_request.name)
 
     async def _gw_read_hostname(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
         """Return the gateway hostname."""
