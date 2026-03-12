@@ -18,6 +18,7 @@ from cloudApi.device_twin_reported import DeviceTwinReporter
 from cloudApi.dps_client import DPSClient
 from cloudApi.event_sender import EventSender
 from cloudApi.method_request_handler import MethodRequestHandler
+from liftApi.lift_identifier import LiftType
 
 
 class TestDPSClient(unittest.IsolatedAsyncioTestCase):
@@ -75,8 +76,36 @@ class TestEventSender(unittest.IsolatedAsyncioTestCase):
         await sender.send_event(payload)
 
         mock_message.assert_called_once_with(json.dumps(payload))
-        self.assertEqual(message.custom_properties.get("LIFT_TYPE"), "1")
+        self.assertEqual(message.custom_properties.get("LIFT_TYPE"), "unknown")
         device_client.send_message.assert_awaited_once_with(message)
+
+    @patch("cloudApi.event_sender.Message")
+    async def test_send_event_with_ahl_lift_type(self, mock_message):
+        message = MagicMock()
+        message.custom_properties = {}
+        mock_message.return_value = message
+
+        device_client = MagicMock()
+        device_client.send_message = AsyncMock()
+
+        sender = EventSender(device_client, LiftType.AHL)
+        await sender.send_event({"temp": 21})
+
+        self.assertEqual(message.custom_properties["LIFT_TYPE"], "AHL")
+
+    @patch("cloudApi.event_sender.Message")
+    async def test_send_event_with_1k_lift_type(self, mock_message):
+        message = MagicMock()
+        message.custom_properties = {}
+        mock_message.return_value = message
+
+        device_client = MagicMock()
+        device_client.send_message = AsyncMock()
+
+        sender = EventSender(device_client, LiftType.ONE_K)
+        await sender.send_event({"temp": 21})
+
+        self.assertEqual(message.custom_properties["LIFT_TYPE"], "1k")
 
 
 class TestMethodRequestHandler(unittest.IsolatedAsyncioTestCase):

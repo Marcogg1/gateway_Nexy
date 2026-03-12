@@ -1,9 +1,11 @@
 import json
-import logging
 from azure.iot.device.aio import IoTHubDeviceClient
 from azure.iot.device import Message
 
-logger = logging.getLogger(__name__)
+from liftApi.lift_identifier import LiftType
+from lib.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class EventSender:
@@ -12,13 +14,15 @@ class EventSender:
 
     Attributes:
         device_client (IoTHubDeviceClient): The IoT Hub device client used to send messages.
+        lift_type (LiftType): The identified lift type for this session.
 
     Methods:
         send_event(payload: dict) -> None:
     """
-    
-    def __init__(self, device_client: IoTHubDeviceClient):
+
+    def __init__(self, device_client: IoTHubDeviceClient, lift_type: LiftType = LiftType.UNKNOWN):
         self.device_client = device_client
+        self.lift_type = lift_type
 
     async def send_event(self, payload: dict) -> None:
         """
@@ -34,7 +38,7 @@ class EventSender:
         """
         try:
             message = Message(json.dumps(payload))
-            message.custom_properties["LIFT_TYPE"] = "1" # Lift type is set when GW is setting up communicationtowards lift
+            message.custom_properties["LIFT_TYPE"] = self.lift_type.value
             
             await self.device_client.send_message(message)
             logger.info(f"Event sent: {payload}")
