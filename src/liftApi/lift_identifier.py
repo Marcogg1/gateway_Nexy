@@ -6,6 +6,7 @@ which lift type is connected. Runs once during startup — the identified
 lift type is assumed constant for the entire power cycle.
 """
 
+import asyncio
 from enum import Enum, unique
 
 from lib.error_signals import MbCode, Rs232Code
@@ -24,11 +25,15 @@ class LiftType(Enum):
     ONE_K = "1k"
 
 
-def identify_lift(modbus_handler, rs232_handler) -> LiftType:
+async def identify_lift(modbus_handler, rs232_handler) -> LiftType:
     """Probe handlers to determine which lift type is connected.
 
     Tries ModbusHandler first (AHL lift). If that fails, tries
     RS232Handler (1k lift). Returns UNKNOWN if neither responds.
+
+    The underlying handler calls are synchronous (serial I/O), so they
+    are offloaded to a thread via asyncio.to_thread() to avoid blocking
+    the event loop.
 
     Args:
         modbus_handler: ModBusHandler instance (or None to skip).
@@ -39,7 +44,9 @@ def identify_lift(modbus_handler, rs232_handler) -> LiftType:
     """
     if modbus_handler is not None:
         try:
-            _, _, err = modbus_handler.read_parameter([LCM_SOFTWARE_VERSION_PARAM])
+            _, _, err = await asyncio.to_thread(
+                modbus_handler.read_parameter, [LCM_SOFTWARE_VERSION_PARAM]
+            )
             if err == MbCode.NO_ERR.name:
                 logger.info("Lift identified as AHL (Modbus responded)")
                 return LiftType.AHL
@@ -51,7 +58,9 @@ def identify_lift(modbus_handler, rs232_handler) -> LiftType:
 
     if rs232_handler is not None:
         try:
-            _, _, err = rs232_handler.get_ar_version()
+            _, _, err = await asyncio.to_thread(
+                rs232_handler.get_ar_version
+            )
             if err == Rs232Code.NO_ERR.name:
                 logger.info("Lift identified as 1k (RS232 responded)")
                 return LiftType.ONE_K

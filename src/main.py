@@ -46,7 +46,7 @@ async def main():
     try:
         modbus_handler = ModBusHandler()
         rs232_handler = Rs232Handler()
-        lift_type = identify_lift(modbus_handler, rs232_handler)
+        lift_type = await identify_lift(modbus_handler, rs232_handler)
         logger.info("Lift type identified: %s", lift_type.value)
     except Exception as e:
         logger.error(f"Lift identification failed: {e}", exc_info=True)
