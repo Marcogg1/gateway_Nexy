@@ -7,9 +7,8 @@ from cloudApi.event_sender import EventSender
 from cloudApi.heartbeat_handler import HeartbeatHandler
 from cloudApi.device_twin_desired_handler import DeviceTwinDesiredHandler
 from liftApi.lift_simulator import LiftSimulator
-from liftApi.lift_identifier import identify_lift
-from liftApi.modbus_handler import ModBusHandler
-from liftApi.rs232_handler import Rs232Handler
+from liftApi.lift_proxy import LiftProxy
+from liftApi.lift_identifier import LiftType
 from lib.logging_config import setup_logging, get_logger
 
 # Setup logging at module level
@@ -42,21 +41,22 @@ async def main():
         logger.error(f"Device client creation/connect failed: {e}", exc_info=True)
         return
 
-    # Identify connected lift type (runs once at startup)
+    # Initialize lift proxy (creates handlers, identifies lift type)
     try:
-        modbus_handler = ModBusHandler()
-        rs232_handler = Rs232Handler()
-        lift_type = await identify_lift(modbus_handler, rs232_handler)
-        logger.info("Lift type identified: %s", lift_type.value)
+        proxy = await LiftProxy.create()
+        if proxy.lift_type == LiftType.UNKNOWN:
+            logger.error("Could not identify lift type, exiting")
+            return
+        logger.info("Lift type identified: %s", proxy.lift_type.value)
     except Exception as e:
-        logger.error(f"Lift identification failed: {e}", exc_info=True)
+        logger.error(f"Lift proxy initialization failed: {e}", exc_info=True)
         return
 
     # Init handlers
     try:
         method_handler = MethodRequestHandler(device_client)
         reporter = DeviceTwinReporter(device_client)
-        send_event = EventSender(device_client, lift_type)
+        send_event = EventSender(device_client, proxy.lift_type)
         liftSim = LiftSimulator(reporter, send_event) # Init lift simulator, used for testing device twin reporting. Remove when not needed
         desired_handler = await DeviceTwinDesiredHandler.create(device_client)
         heartbeat_handler = HeartbeatHandler(send_event, reporter, desired_handler)

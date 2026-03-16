@@ -67,8 +67,9 @@ The Azure Pipelines CI runs `utils/delivery_check.py` with flags `-a -x -l -u` f
 `src/main.py` orchestrates the application lifecycle:
 1. **Device Provisioning**: Uses DPS (Device Provisioning Service) with X.509 certificates
 2. **Device Client Creation**: Establishes Azure IoT Hub connection
-3. **Handler Initialization**: Sets up concurrent async handlers
-4. **Parallel Execution**: Runs all handlers using `asyncio.gather()`
+3. **Lift Proxy Initialization**: Creates `LiftProxy` which identifies the connected lift type (AHL or 1k) and pairs the correct handler + parameter library
+4. **Handler Initialization**: Sets up concurrent async handlers
+5. **Parallel Execution**: Runs all handlers using `asyncio.gather()`
 
 ### Core Components
 
@@ -81,7 +82,10 @@ The Azure Pipelines CI runs `utils/delivery_check.py` with flags `-a -x -l -u` f
 - `blob_upload_handler.py` - Uploads files to Azure Blob Storage via IoT Hub
 
 **Lift API (`src/liftApi/`)**
-- `rs232_handler.py` - RS232 serial communication with lift equipment
+- `lift_proxy.py` - Single entry point to lift hardware for all consumers (cloud, WiFi, BT). Owns the matched handler + lib pair based on identified lift type.
+- `modbus_handler.py` - Modbus RTU communication with AHL lift equipment
+- `rs232_handler.py` - RS232 serial communication with 1k lift equipment
+- `lift_identifier.py` - Probes handlers to determine connected lift type (AHL or 1k)
 - `lift_simulator.py` - Test simulator for development (remove in production)
 
 **File Management (`src/filemgmt/`)**
@@ -89,8 +93,9 @@ The Azure Pipelines CI runs `utils/delivery_check.py` with flags `-a -x -l -u` f
 
 **Library (`src/lib/`)**
 - `error_signals.py` - Centralized error code enums for all handlers
+- `ahl_lib.py` - Parameter database and definitions for AHL lifts
+- `thousand_lib.py` - Parameter database and utility library for 1k lifts
 - `sync_time_handler.py` - Time synchronization with lift equipment
-- `thousand_lib.py` - Large utility library for lift operations
 
 ### Configuration
 
