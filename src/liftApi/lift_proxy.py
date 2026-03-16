@@ -1,0 +1,91 @@
+"""LiftProxy — single entry point to lift hardware for all consumers.
+
+Owns the matched handler + lib pair based on the identified lift type.
+All lift access (cloud, WiFi, BT) goes through this proxy.
+"""
+
+import asyncio
+
+from lib.ahl_lib import AhlLib
+from lib.error_signals import LpCode
+from lib.logging_config import get_logger
+from lib.thousand_lib import ThousandLib
+from liftApi.lift_identifier import LiftType, identify_lift
+from liftApi.modbus_handler import ModBusHandler
+from liftApi.rs232_handler import Rs232Handler
+
+logger = get_logger(__name__)
+
+IDENTIFY_MAX_RETRIES = 10
+IDENTIFY_RETRY_DELAY = 5
+
+
+class LiftProxy:
+    """Proxy layer between consumers and lift hardware.
+
+    Creates both handlers, identifies the lift type, and keeps only
+    the matched handler + lib pair. Consumers access lift data through
+    this proxy — never directly through handlers.
+
+    Usage:
+        proxy = await LiftProxy.create()
+    """
+
+    def __init__(self) -> None:
+        self._handler: ModBusHandler | Rs232Handler | None = None
+        self._lib: AhlLib | ThousandLib | None = None
+        self._lift_type: LiftType = LiftType.UNKNOWN
+
+    @classmethod
+    async def create(cls) -> "LiftProxy":
+        """Async factory — creates handlers, identifies lift, keeps matched pair.
+
+        Returns:
+            Initialized LiftProxy with the correct handler + lib for the
+            connected lift, or UNKNOWN if neither responds.
+        """
+        proxy = cls()
+        await proxy._identify_and_init()
+        return proxy
+
+    @property
+    def lift_type(self) -> LiftType:
+        """The identified lift type (AHL, ONE_K, or UNKNOWN)."""
+        return self._lift_type
+
+    @property
+    def lib(self) -> AhlLib | ThousandLib | None:
+        """The parameter library for the identified lift type."""
+        return self._lib
+
+    async def _identify_and_init(self) -> None:
+        """Create handlers, identify lift with retries, keep matched pair."""
+        modbus_handler = await asyncio.to_thread(ModBusHandler)
+        rs232_handler = await asyncio.to_thread(Rs232Handler)
+
+        for attempt in range(IDENTIFY_MAX_RETRIES):
+            self._lift_type = await identify_lift(modbus_handler, rs232_handler)
+            if self._lift_type != LiftType.UNKNOWN:
+                break
+            if attempt < IDENTIFY_MAX_RETRIES - 1:
+                logger.warning(
+                    "Identification attempt %d/%d failed, retrying in %ds",
+                    attempt + 1, IDENTIFY_MAX_RETRIES, IDENTIFY_RETRY_DELAY
+                )
+                await asyncio.sleep(IDENTIFY_RETRY_DELAY)
+
+        match self._lift_type:
+            case LiftType.AHL:
+                self._handler = modbus_handler
+                self._lib = AhlLib()
+                logger.info("LiftProxy initialized for AHL lift")
+            case LiftType.ONE_K:
+                self._handler = rs232_handler
+                self._lib = ThousandLib()
+                logger.info("LiftProxy initialized for 1k lift")
+            case LiftType.UNKNOWN:
+                logger.error(
+                    "%s: %s - Failed to identify lift after %d attempts",
+                    LpCode.SOURCE.value, LpCode.IDENTIFY_ERR.name,
+                    IDENTIFY_MAX_RETRIES
+                )
