@@ -227,3 +227,21 @@ class HbCode(Enum):
     SEND_EVENT_ERR = 1
     REPORT_PROPERTY_ERR = 2
     INTERVAL_READ_ERR = 3
+
+
+@unique
+class LpCode(Enum):
+    """LiftProxy error codes."""
+    SOURCE = "LiftProxy"
+    NO_ERR = 0
+    INIT_ERR = 1
+    IDENTIFY_ERR = 2
+    LINK_ERR = 3
+    PARAM_NOT_IN_DB = 4
+    PARAM_NOT_SET = 5
+    PARAM_READ_ONLY = 6
+    COM_ERR = 7
+    ARG_ERR = 8
+    POLL_ERR = 9
+    LOG_ERR = 10
+    FILE_ERR = 11
