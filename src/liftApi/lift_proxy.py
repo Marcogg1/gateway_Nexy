@@ -54,6 +54,11 @@ class LiftProxy:
         return self._lift_type
 
     @property
+    def handler(self) -> ModBusHandler | Rs232Handler | None:
+        """The matched hardware handler for the identified lift type."""
+        return self._handler
+
+    @property
     def lib(self) -> AhlLib | ThousandLib | None:
         """The parameter library for the identified lift type."""
         return self._lib

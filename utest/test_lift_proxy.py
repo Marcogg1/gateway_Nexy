@@ -30,8 +30,8 @@ class TestLpCode(unittest.TestCase):
         self.assertEqual(actual, expected)
 
 
-class TestLiftProxyCreate(unittest.IsolatedAsyncioTestCase):
-    """Tests for LiftProxy.create() async factory."""
+class LiftProxyTestBase(unittest.IsolatedAsyncioTestCase):
+    """Shared setup for LiftProxy tests — patches handlers and libs."""
 
     def setUp(self):
         self.mock_modbus = MagicMock()
@@ -60,6 +60,10 @@ class TestLiftProxyCreate(unittest.IsolatedAsyncioTestCase):
         self.patcher_ahl.stop()
         self.patcher_tl.stop()
 
+
+class TestLiftProxyCreate(LiftProxyTestBase):
+    """Tests for LiftProxy.create() async factory."""
+
     # --- AHL identification ---
 
     @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
@@ -78,7 +82,7 @@ class TestLiftProxyCreate(unittest.IsolatedAsyncioTestCase):
     async def test_ahl_keeps_modbus_handler(self, mock_identify):
         mock_identify.return_value = LiftType.AHL
         proxy = await LiftProxy.create()
-        self.assertIs(proxy._handler, self.mock_modbus)
+        self.assertIs(proxy.handler, self.mock_modbus)
 
     # --- 1k identification ---
 
@@ -98,7 +102,7 @@ class TestLiftProxyCreate(unittest.IsolatedAsyncioTestCase):
     async def test_1k_keeps_rs232_handler(self, mock_identify):
         mock_identify.return_value = LiftType.ONE_K
         proxy = await LiftProxy.create()
-        self.assertIs(proxy._handler, self.mock_rs232)
+        self.assertIs(proxy.handler, self.mock_rs232)
 
     # --- Unknown identification (all retries exhausted) ---
 
@@ -114,7 +118,7 @@ class TestLiftProxyCreate(unittest.IsolatedAsyncioTestCase):
     async def test_unknown_handler_is_none(self, mock_identify, _mock_sleep):
         mock_identify.return_value = LiftType.UNKNOWN
         proxy = await LiftProxy.create()
-        self.assertIsNone(proxy._handler)
+        self.assertIsNone(proxy.handler)
 
     @patch("liftApi.lift_proxy.asyncio.sleep", new_callable=AsyncMock)
     @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
@@ -144,48 +148,28 @@ class TestLiftProxyCreate(unittest.IsolatedAsyncioTestCase):
     async def test_ahl_discards_rs232_handler(self, mock_identify):
         mock_identify.return_value = LiftType.AHL
         proxy = await LiftProxy.create()
-        self.assertIsNot(proxy._handler, self.mock_rs232)
+        self.assertIsNot(proxy.handler, self.mock_rs232)
 
     @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
     async def test_1k_discards_modbus_handler(self, mock_identify):
         mock_identify.return_value = LiftType.ONE_K
         proxy = await LiftProxy.create()
-        self.assertIsNot(proxy._handler, self.mock_modbus)
+        self.assertIsNot(proxy.handler, self.mock_modbus)
 
 
-class TestLiftProxyRetry(unittest.IsolatedAsyncioTestCase):
+class TestLiftProxyRetry(LiftProxyTestBase):
     """Tests for identification retry behavior."""
 
     def setUp(self):
-        self.mock_modbus = MagicMock()
-        self.mock_rs232 = MagicMock()
-
-        self.patcher_modbus = patch(
-            "liftApi.lift_proxy.ModBusHandler",
-            return_value=self.mock_modbus,
-        )
-        self.patcher_rs232 = patch(
-            "liftApi.lift_proxy.Rs232Handler",
-            return_value=self.mock_rs232,
-        )
-        self.patcher_ahl = patch("liftApi.lift_proxy.AhlLib")
-        self.patcher_tl = patch("liftApi.lift_proxy.ThousandLib")
+        super().setUp()
         self.patcher_sleep = patch(
             "liftApi.lift_proxy.asyncio.sleep", new_callable=AsyncMock
         )
-
-        self.MockModBus = self.patcher_modbus.start()
-        self.MockRs232 = self.patcher_rs232.start()
-        self.MockAhlLib = self.patcher_ahl.start()
-        self.MockThousandLib = self.patcher_tl.start()
         self.mock_sleep = self.patcher_sleep.start()
 
     def tearDown(self):
-        self.patcher_modbus.stop()
-        self.patcher_rs232.stop()
-        self.patcher_ahl.stop()
-        self.patcher_tl.stop()
         self.patcher_sleep.stop()
+        super().tearDown()
 
     @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
     async def test_retries_on_unknown_then_succeeds(self, mock_identify):
