@@ -245,3 +245,5 @@ class LpCode(Enum):
     POLL_ERR = 9
     LOG_ERR = 10
     FILE_ERR = 11
+    PARTIAL_ERR = 12
+    DATA_ERR = 13

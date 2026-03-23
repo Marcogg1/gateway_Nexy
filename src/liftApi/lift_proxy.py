@@ -94,3 +94,22 @@ class LiftProxy:
                     LpCode.SOURCE.value, LpCode.IDENTIFY_ERR.name,
                     IDENTIFY_MAX_RETRIES
                 )
+
+    def get_param_value(self, param: int) -> tuple[int | str | None, LpCode]:
+        """Read a parameter value from the lib's database.
+
+        Args:
+            param: Parameter number to read.
+
+        Returns:
+            Tuple of (value, LpCode).
+        """
+        if self._lib is None:
+            return None, LpCode.INIT_ERR
+
+        value, err_code_name = self._lib.get_param(param)
+        try:
+            return value, LpCode[err_code_name]
+        except KeyError:
+            logger.warning("Unknown error code from lib: %s", err_code_name)
+            return value, LpCode.COM_ERR

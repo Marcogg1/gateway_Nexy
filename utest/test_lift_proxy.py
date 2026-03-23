@@ -25,6 +25,7 @@ class TestLpCode(unittest.TestCase):
             "SOURCE", "NO_ERR", "INIT_ERR", "IDENTIFY_ERR", "LINK_ERR",
             "PARAM_NOT_IN_DB", "PARAM_NOT_SET", "PARAM_READ_ONLY",
             "COM_ERR", "ARG_ERR", "POLL_ERR", "LOG_ERR", "FILE_ERR",
+            "PARTIAL_ERR", "DATA_ERR",
         ]
         actual = [m.name for m in LpCode]
         self.assertEqual(actual, expected)
@@ -204,6 +205,50 @@ class TestLiftProxyRetry(LiftProxyTestBase):
         await LiftProxy.create()
         # Sleep is called between retries, not after the last one
         self.assertEqual(self.mock_sleep.call_count, 9)  # 10 attempts, 9 sleeps
+
+
+class TestGetParamValue(unittest.TestCase):
+    """Tests for LiftProxy.get_param_value()."""
+
+    def setUp(self):
+        self.proxy = LiftProxy()
+        self.mock_lib = MagicMock()
+        self.proxy._lib = self.mock_lib
+
+    def test_returns_value_and_no_err(self):
+        self.mock_lib.get_param.return_value = (42, "NO_ERR")
+        value, code = self.proxy.get_param_value(100)
+        self.assertEqual(value, 42)
+        self.assertEqual(code, LpCode.NO_ERR)
+
+    def test_param_not_in_db(self):
+        self.mock_lib.get_param.return_value = (-1, "PARAM_NOT_IN_DB")
+        value, code = self.proxy.get_param_value(999)
+        self.assertEqual(value, -1)
+        self.assertEqual(code, LpCode.PARAM_NOT_IN_DB)
+
+    def test_param_not_set(self):
+        self.mock_lib.get_param.return_value = (-1, "PARAM_NOT_SET")
+        value, code = self.proxy.get_param_value(100)
+        self.assertEqual(value, -1)
+        self.assertEqual(code, LpCode.PARAM_NOT_SET)
+
+    def test_unknown_error_code_returns_com_err(self):
+        self.mock_lib.get_param.return_value = (-1, "SOME_UNKNOWN_CODE")
+        value, code = self.proxy.get_param_value(100)
+        self.assertEqual(value, -1)
+        self.assertEqual(code, LpCode.COM_ERR)
+
+    def test_lib_none_returns_init_err(self):
+        self.proxy._lib = None
+        value, code = self.proxy.get_param_value(100)
+        self.assertIsNone(value)
+        self.assertEqual(code, LpCode.INIT_ERR)
+
+    def test_delegates_to_lib_get_param(self):
+        self.mock_lib.get_param.return_value = (42, "NO_ERR")
+        self.proxy.get_param_value(100)
+        self.mock_lib.get_param.assert_called_once_with(100)
 
 
 if __name__ == "__main__":
