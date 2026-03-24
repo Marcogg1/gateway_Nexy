@@ -102,7 +102,8 @@ class LiftProxy:
             param: Parameter number to read.
 
         Returns:
-            Tuple of (value, LpCode).
+            Tuple of (value, LpCode) where value is None on INIT_ERR
+            or -1 on lib errors.
         """
         if self._lib is None:
             return None, LpCode.INIT_ERR
