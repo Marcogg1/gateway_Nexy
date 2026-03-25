@@ -114,3 +114,20 @@ class LiftProxy:
         except KeyError:
             logger.warning("Unknown error code from lib: %s", err_code_name)
             return value, LpCode.COM_ERR
+
+    async def write_param(self, param: str, value: str) -> tuple[int, str, str]:
+        """Write a parameter value to lift hardware via the handler.
+
+        Args:
+            param: Parameter number as string.
+            value: Value to write as string.
+
+        Returns:
+            Tuple of (status, error_source, error_code) matching the
+            legacy cloud API contract.
+        """
+        if self._handler is None:
+            return -1, LpCode.SOURCE.value, LpCode.INIT_ERR.name
+        return await asyncio.to_thread(
+            self._handler.write_parameter, [param, value]
+        )

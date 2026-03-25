@@ -251,5 +251,40 @@ class TestGetParamValue(unittest.TestCase):
         self.mock_lib.get_param.assert_called_once_with(100)
 
 
+class TestWriteParam(unittest.IsolatedAsyncioTestCase):
+    """Tests for LiftProxy.write_param()."""
+
+    def setUp(self):
+        self.proxy = LiftProxy()
+        self.mock_handler = MagicMock()
+        self.proxy._handler = self.mock_handler
+
+    async def test_handler_none_returns_init_err(self):
+        self.proxy._handler = None
+        status, source, code = await self.proxy.write_param("5", "42")
+        self.assertEqual(status, -1)
+        self.assertEqual(source, "LiftProxy")
+        self.assertEqual(code, "INIT_ERR")
+
+    async def test_delegates_to_write_parameter(self):
+        self.mock_handler.write_parameter.return_value = (0, "ModBusHandler", "NO_ERR")
+        await self.proxy.write_param("5", "42")
+        self.mock_handler.write_parameter.assert_called_once_with(["5", "42"])
+
+    async def test_success_passes_through(self):
+        self.mock_handler.write_parameter.return_value = (0, "ModBusHandler", "NO_ERR")
+        status, source, code = await self.proxy.write_param("5", "42")
+        self.assertEqual(status, 0)
+        self.assertEqual(source, "ModBusHandler")
+        self.assertEqual(code, "NO_ERR")
+
+    async def test_error_passes_through(self):
+        self.mock_handler.write_parameter.return_value = (-1, "Rs232Handler", "FLOOR_LOCK_ERR")
+        status, source, code = await self.proxy.write_param("5", "42")
+        self.assertEqual(status, -1)
+        self.assertEqual(source, "Rs232Handler")
+        self.assertEqual(code, "FLOOR_LOCK_ERR")
+
+
 if __name__ == "__main__":
     unittest.main()
