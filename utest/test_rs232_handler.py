@@ -2625,7 +2625,7 @@ class TestRs232Handler:
             is_file_mock.return_value = False
             path_exists_mock.return_value = True
 
-            self.rs.read_parameter_1k = mock.MagicMock(return_value=['AR123456', 'name', no_err])
+            self.rs.read_parameter = mock.MagicMock(return_value=['AR123456', 'name', no_err])
 
             fname, err_code = self.rs._Rs232Handler__write_log_to_file(data)
             assert err_code == no_err
@@ -2657,7 +2657,7 @@ class TestRs232Handler:
         with mock.patch('builtins.open') as my_mock:
             my_mock.side_effect = error
 
-            self.rs.read_parameter_1k = mock.MagicMock(return_value=['AR123456', 'name', no_err])
+            self.rs.read_parameter = mock.MagicMock(return_value=['AR123456', 'name', no_err])
 
             _, err_code = self.rs._Rs232Handler__write_log_to_file(data)
             assert err_code == exp_code
@@ -2668,7 +2668,7 @@ class TestRs232Handler:
         with mock.patch('builtins.open') as my_mock:
             my_mock.side_effect = error
 
-            self.rs.read_parameter_1k = mock.MagicMock(return_value=['AR123456', 'name', no_err])
+            self.rs.read_parameter = mock.MagicMock(return_value=['AR123456', 'name', no_err])
 
             _, err_code = self.rs._Rs232Handler__write_log_to_file(data)
             assert err_code == exp_code
@@ -2684,7 +2684,7 @@ class TestRs232Handler:
         mock_pathexists.return_value = False
         self.rs._RS232Handler__set_1000_log_file_dir = mock.MagicMock(return_value=False)
 
-        self.rs.read_parameter_1k = mock.MagicMock(return_value=['AR123456', 'name', no_err])
+        self.rs.read_parameter = mock.MagicMock(return_value=['AR123456', 'name', no_err])
         _, err_code = self.rs._Rs232Handler__write_log_to_file(data)
         assert err_code == self.rsCodes.LOG_FILE_IO_ERR.name
 
@@ -2704,7 +2704,7 @@ class TestRs232Handler:
             path_exist_mock.return_value = True
             is_file_mock.return_value = False
 
-            self.rs.read_parameter_1k = mock.MagicMock(return_value=['AR123456', 'name', no_err])
+            self.rs.read_parameter = mock.MagicMock(return_value=['AR123456', 'name', no_err])
 
             self.rs._RS232Handler__set_1000_log_file_dir = mock.MagicMock(return_value=True)
 
@@ -2714,59 +2714,59 @@ class TestRs232Handler:
         f.close()
         os.remove(testfile)
 
-    def test_write_parameter_1k(self):
+    def test_write_parameter(self):
         """
-        Test everything through the write_parameter_1k function, all fails all the way to the no err in the end
+        Test everything through the write_parameter function, all fails all the way to the no err in the end
         """
         # Test argument validation
         args = [1]
-        status, name, err = self.rs.write_parameter_1k(args)
+        status, name, err = self.rs.write_parameter(args)
         assert status == -1
         assert name == self.rs.name
         assert err == self.rs.rs232Codes.ARGS_IN_LEN_ERR.name
 
         args = [1, 2, 3]
-        status, name, err = self.rs.write_parameter_1k(args)
+        status, name, err = self.rs.write_parameter(args)
         assert status == -1
         assert name == self.rs.name
         assert err == self.rs.rs232Codes.ARGS_IN_LEN_ERR.name
 
         args = ['abc', 1]
-        status, name, err = self.rs.write_parameter_1k(args)
+        status, name, err = self.rs.write_parameter(args)
         assert status == -1
         assert name == self.rs.name
         assert err == self.rs.rs232Codes.ARGS_IN_ELEM_INT_ERR.name
 
         args = [1, 'abc']
-        status, name, err = self.rs.write_parameter_1k(args)
+        status, name, err = self.rs.write_parameter(args)
         assert status == -1
         assert name == self.rs.name
         assert err == self.rs.rs232Codes.ARGS_IN_ELEM_INT_ERR.name
 
         args = [1, [17]]
-        status, name, err = self.rs.write_parameter_1k(args)
+        status, name, err = self.rs.write_parameter(args)
         assert status == -1
         assert name == self.rs.name
         assert err == self.rs.rs232Codes.ARGS_IN_ELEM_INT_ERR.name
 
         # Test the #backwardCompatibility
-        self.rs.read_parameter_1k = mock.MagicMock(return_value=['',
+        self.rs.read_parameter = mock.MagicMock(return_value=['',
                                                                  self.rs.name,
                                                                  self.rs.rs232Codes.PARAM_NOT_SET.name])
         args = [69, 420]
-        status, name, err = self.rs.write_parameter_1k(args)
+        status, name, err = self.rs.write_parameter(args)
         assert status == -1
         assert name == self.rs.name
         assert err == self.rs.rs232Codes.WRITE_PARAM_NOT_SUPPORTED_BY_1K.name
 
         # Mocking this to something OK, so we don't hit this error anymore
-        self.rs.read_parameter_1k = mock.MagicMock(return_value=['',
+        self.rs.read_parameter = mock.MagicMock(return_value=['',
                                                                  self.rs.name,
                                                                  self.rs.rs232Codes.NO_ERR.name])
 
         # Test not getting an ok file back from get_file_for_param
         self.rs.tl.get_file_for_param = mock.MagicMock(return_value='')
-        status, name, err = self.rs.write_parameter_1k(args)
+        status, name, err = self.rs.write_parameter(args)
         assert status == -1
         assert name == self.rs.name
         assert err == self.rs.rs232Codes.WRITE_PARAM_NOT_IN_FILES.name
@@ -2776,20 +2776,20 @@ class TestRs232Handler:
 
         # Test file read error
         self.rs.read_1k_file = mock.MagicMock(return_value=[[{}], '', '', '', self.rs.rs232Codes.DATA_ERR.name])
-        status, name, err = self.rs.write_parameter_1k(args)
+        status, name, err = self.rs.write_parameter(args)
         assert status == -1
         assert name == self.rs.name
         assert err == self.rs.rs232Codes.DATA_ERR.name
 
         self.rs.read_1k_file = mock.MagicMock(return_value=[[{}], '', '', '', self.rs.rs232Codes.LIST_INDEX_ERR.name])
-        status, name, err = self.rs.write_parameter_1k(args)
+        status, name, err = self.rs.write_parameter(args)
         assert status == -1
         assert name == self.rs.name
         assert err == self.rs.rs232Codes.LIST_INDEX_ERR.name
 
         # Testing not getting a good response from the readFile command
         self.rs.read_1k_file = mock.MagicMock(return_value=[[{"no_data_key": "rubbish"}], '', '', '', self.rs.rs232Codes.NO_ERR.name])
-        status, name, err = self.rs.write_parameter_1k(args)
+        status, name, err = self.rs.write_parameter(args)
         assert status == -1
         assert name == self.rs.name
         assert err == self.rs.rs232Codes.DATA_ERR.name
@@ -2798,14 +2798,14 @@ class TestRs232Handler:
         args = [97, 16]
         self.rs.read_1k_file = mock.MagicMock(return_value=[[{"data": [1, 2, 3, 4]}], '', '', '', self.rs.rs232Codes.NO_ERR.name])
         self.rs.write_1k_file = mock.MagicMock(return_value=["", "", self.rs.rs232Codes.DATA_ERR.name])
-        status, name, err = self.rs.write_parameter_1k(args)
+        status, name, err = self.rs.write_parameter(args)
         assert status == -1
         assert name == self.rs.name
         assert err == self.rs.rs232Codes.DATA_ERR.name
 
         # Test everything ok
         self.rs.write_1k_file = mock.MagicMock(return_value=["", "", self.rs.rs232Codes.NO_ERR.name])
-        status, name, err = self.rs.write_parameter_1k(args)
+        status, name, err = self.rs.write_parameter(args)
         assert status == 0
         assert name == self.rs.name
         assert err == self.rs.rs232Codes.NO_ERR.name
@@ -2814,10 +2814,10 @@ class TestRs232Handler:
         # value = 0
         args = [10, 0]
 
-        self.rs.read_parameter_1k = mock.MagicMock(return_value=["", "", self.rs.rs232Codes.NO_ERR.name])
+        self.rs.read_parameter = mock.MagicMock(return_value=["", "", self.rs.rs232Codes.NO_ERR.name])
         self.rs.set_oil_level = mock.MagicMock(return_value=["", "", self.rs.rs232Codes.NO_ERR.name])
 
-        status, name, err = self.rs.write_parameter_1k(args)
+        status, name, err = self.rs.write_parameter(args)
         assert status == 0
         assert name == self.rsCodes.SOURCE.value
         assert err == self.rs.rs232Codes.NO_ERR.name
@@ -2825,7 +2825,7 @@ class TestRs232Handler:
         #value 100
         args = [10, 100]
 
-        status, name, err = self.rs.write_parameter_1k(args)
+        status, name, err = self.rs.write_parameter(args)
         assert status == 0
         assert name == self.rsCodes.SOURCE.value
         assert err == self.rs.rs232Codes.NO_ERR.name
@@ -2833,14 +2833,14 @@ class TestRs232Handler:
         # value -1
         args = [10, -1]
 
-        status, name, err = self.rs.write_parameter_1k(args)
+        status, name, err = self.rs.write_parameter(args)
         assert status == -1
         assert name == self.rsCodes.SOURCE.value
         assert err == self.rs.rs232Codes.DATA_ERR.name
 
         # value = 101
         args = [10, 101]
-        status, name, err = self.rs.write_parameter_1k(args)
+        status, name, err = self.rs.write_parameter(args)
         assert status == -1
         assert name == self.rsCodes.SOURCE.value
         assert err == self.rs.rs232Codes.DATA_ERR.name

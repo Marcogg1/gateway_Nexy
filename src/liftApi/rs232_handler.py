@@ -1014,7 +1014,7 @@ class Rs232Handler:
                     err_code = self.rs232Codes.LOG_FILE_IO_ERR.name
                     return fname_err, err_code
 
-            obj_id, _, err_code = self.read_parameter_1k(["0"])
+            obj_id, _, err_code = self.read_parameter(["0"])
             if err_code != self.rs232Codes.NO_ERR.name:
                 self.logger.error("Error: Object ID not set")
                 return -1, self.rs232Codes.NO_UPDATED_PARAMS.name
@@ -1515,14 +1515,14 @@ class Rs232Handler:
 
         return status_last, self.name, err_code
 
-    def read_parameter_1k(self, args: list) -> tuple[int, str, str]:
+    def read_parameter(self, args: list[str]) -> tuple[int, str, str]:
         """
         Get parameter for stored values. (1030,1031)
         """
         value, err_code = self.tl.get_param(int(args[0]))
         return value, self.name, err_code
 
-    def write_parameter_1k(self, args: list) -> tuple[int, str, str]:
+    def write_parameter(self, args: list[str]) -> tuple[int, str, str]:
         """
         Read the file, replace the parameter we are writing to, save the file. (1040,1041)
         """
@@ -1544,7 +1544,7 @@ class Rs232Handler:
             return -1, self.name, self.rs232Codes.ARGS_IN_ELEM_INT_ERR.name
 
         # Check if param already has requested value, if so, do nothing and return gracefully
-        current_val, _, err_code = self.read_parameter_1k([param_str])
+        current_val, _, err_code = self.read_parameter([param_str])
         if err_code == self.rs232Codes.NO_ERR.name and current_val == value_str:
             self.logger.debug(f"Param {param_str} already has value {value_str}, returning gracefully")
             return 0, self.name, self.rs232Codes.NO_ERR.name
@@ -1603,7 +1603,7 @@ class Rs232Handler:
             # If we cannot read the param from the database, it has never been polled successfully and (probably) does
             # not exist. This means we cannot write to this if there has been no successful poll, but then lift_type is
             # 0 in CA anyway, and we won't be able to DDM write any param.
-            _, _, err_code = self.read_parameter_1k([param_str])
+            _, _, err_code = self.read_parameter([param_str])
             if err_code != self.rs232Codes.NO_ERR.name:
                 self.logger.error(f"Error: Unable to read value of param {param_str}, it does not exist in db. Can't write to it!")
                 return -1, self.name, self.rs232Codes.WRITE_PARAM_NOT_SUPPORTED_BY_1K.name
@@ -1759,11 +1759,11 @@ def get_and_save_prod_loader_params() -> Any:
 
         for key, value in prodLoadParaNo.items():
             if key != "doubleDoors":
-                prodLoadParaValue[key], _, _ = rs232.read_parameter_1k([value])
+                prodLoadParaValue[key], _, _ = rs232.read_parameter([value])
                 logger.debug(prodLoadParaValue[key])
             elif key == "doubleDoors":
                 for _, double_value in prodLoadParaValue[key].items():
-                    param_value, _, _ = rs232.read_parameter_1k([double_value])
+                    param_value, _, _ = rs232.read_parameter([double_value])
                     double_doors_value.append(param_value)
                 prodLoadParaValue[key] = double_doors_value
             else:
