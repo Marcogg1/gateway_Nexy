@@ -128,6 +128,9 @@ class LiftProxy:
         """
         if self._handler is None:
             return -1, LpCode.SOURCE.value, LpCode.INIT_ERR.name
-        return await asyncio.to_thread(
+        status, source, code = await asyncio.to_thread(
             self._handler.write_parameter, [param, value]
         )
+        if status == 0 and self._lib is not None:
+            self._lib.set_param(int(param), int(value))
+        return status, source, code
