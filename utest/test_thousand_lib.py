@@ -652,6 +652,28 @@ class TestThousandLib(unittest.TestCase):
         assert val == -1
         assert err_code == self.tl.rs232Codes.PARAM_NOT_SET.name
 
+    def test_set_param(self):
+        """Test set_param updates database value."""
+        self.tl.database, _ = self.set_up_mocked_database_with_values()
+        changed, err_code = self.tl.set_param(2, 99)
+        assert changed == [2]
+        assert err_code == self.tl.rs232Codes.NO_ERR.name
+        assert self.tl.database[2].value == 99
+
+    def test_set_param_same_value(self):
+        """Test set_param with unchanged value returns empty list."""
+        self.tl.database, _ = self.set_up_mocked_database_with_values()
+        changed, err_code = self.tl.set_param(2, "2")
+        assert changed == []
+        assert err_code == self.tl.rs232Codes.NO_ERR.name
+
+    def test_set_param_not_in_db(self):
+        """Test set_param with param not in database."""
+        self.tl.database, db_len = self.set_up_mocked_database_with_values()
+        changed, err_code = self.tl.set_param(db_len + 10, 42)
+        assert changed == []
+        assert err_code == self.tl.rs232Codes.PARAM_NOT_IN_DB.name
+
     @staticmethod
     def set_up_mocked_database_with_values():
         database_length = 6

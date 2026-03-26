@@ -72,6 +72,25 @@ class ThousandLib:
         # self.__reset_vfd_motor_param_after_read(param)
         return val, self.rs232Codes.NO_ERR.name
 
+    def set_param(self, param: int, value: int) -> tuple[list[int], str]:
+        """Set a parameter value in the database.
+
+        Args:
+            param: Parameter number to set.
+            value: New value.
+
+        Returns:
+            Tuple of ([param] if changed else [], error_code_name).
+        """
+        try:
+            if self.database[param].value == value:
+                return [], self.rs232Codes.NO_ERR.name
+            self.database[param].value = value
+            return [param], self.rs232Codes.NO_ERR.name
+        except Exception:
+            self.logger.error(f"Param {param} not in 1k database")
+            return [], self.rs232Codes.PARAM_NOT_IN_DB.name
+
     def get_file_for_param(self, param: int) -> str:
         """
         Return a file for where the specified param can be found
