@@ -663,7 +663,8 @@ class TestThousandLib(unittest.TestCase):
     def test_set_param_same_value(self):
         """Test set_param with unchanged value returns empty list."""
         self.tl.database, _ = self.set_up_mocked_database_with_values()
-        changed, err_code = self.tl.set_param(2, "2")
+        self.tl.set_param(2, 99)
+        changed, err_code = self.tl.set_param(2, 99)
         assert changed == []
         assert err_code == self.tl.rs232Codes.NO_ERR.name
 
