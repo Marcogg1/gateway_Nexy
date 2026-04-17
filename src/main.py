@@ -69,6 +69,7 @@ async def main():
         method_handler.listen_for_method(),
         desired_handler.listen_for_desired_updates(),
         heartbeat_handler.run(),
+        proxy.run(send_event, desired_handler),
         liftSim.report_temperature_loop(), # Start temperature reporting loop testing. Remove when not needed
         liftSim.simulate_lift_operation(), # Simulate lift reporting, add properties. Remove when not needed
         liftSim.send_parameter_data() # Simulate telemetry data sending. Remove when not needed

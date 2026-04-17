@@ -1,5 +1,6 @@
 """Unit tests for LiftProxy."""
 
+import asyncio
 import os
 import sys
 import unittest
@@ -37,6 +38,9 @@ class LiftProxyTestBase(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.mock_modbus = MagicMock()
         self.mock_rs232 = MagicMock()
+
+        # _detect_ahl_polling_table reads param 127 — default to "not readable"
+        self.mock_modbus.read_parameter.return_value = (-1, "ModBusHandler", "LCM_ERR")
 
         # Patch handler constructors so no real serial ports are opened
         self.patcher_modbus = patch(
@@ -104,6 +108,12 @@ class TestLiftProxyCreate(LiftProxyTestBase):
         mock_identify.return_value = LiftType.ONE_K
         proxy = await LiftProxy.create()
         self.assertIs(proxy.handler, self.mock_rs232)
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_1k_handler_created_with_shared_lib(self, mock_identify):
+        mock_identify.return_value = LiftType.ONE_K
+        proxy = await LiftProxy.create()
+        self.MockRs232.assert_called_once_with(self.MockThousandLib.return_value)
 
     # --- Unknown identification (all retries exhausted) ---
 
@@ -296,6 +306,269 @@ class TestWriteParam(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, -1)
         self.assertEqual(source, "Rs232Handler")
         self.assertEqual(code, "FLOOR_LOCK_ERR")
+
+
+class TestGetParamPushList(unittest.TestCase):
+    """Tests for LiftProxy._get_param_push_list()."""
+
+    def setUp(self):
+        self.proxy = LiftProxy()
+        self.proxy._lib = MagicMock()
+        self.proxy._lib.DEFAULT_ON_CHANGE_PARAMS = [5, 6, 7]
+        self.proxy._lib.DEFAULT_DAILY_PARAMS = [18, 19]
+        self.proxy._desired_handler = MagicMock()
+
+    def test_returns_lib_defaults_when_no_twin_config(self):
+        self.proxy._desired_handler.desired_properties = {}
+        result = self.proxy._get_param_push_list("onChange")
+        self.assertEqual(result, [5, 6, 7])
+
+    def test_returns_daily_defaults_when_no_twin_config(self):
+        self.proxy._desired_handler.desired_properties = {}
+        result = self.proxy._get_param_push_list("daily")
+        self.assertEqual(result, [18, 19])
+
+    def test_returns_twin_list_when_present(self):
+        self.proxy._desired_handler.desired_properties = {
+            "paramPush": {"onChange": [10, 20, 30]}
+        }
+        result = self.proxy._get_param_push_list("onChange")
+        self.assertEqual(result, [10, 20, 30])
+
+    def test_returns_default_when_twin_list_empty(self):
+        self.proxy._desired_handler.desired_properties = {
+            "paramPush": {"onChange": []}
+        }
+        result = self.proxy._get_param_push_list("onChange")
+        self.assertEqual(result, [5, 6, 7])
+
+    def test_returns_default_when_desired_handler_none(self):
+        self.proxy._desired_handler = None
+        result = self.proxy._get_param_push_list("onChange")
+        self.assertEqual(result, [5, 6, 7])
+
+    def test_returns_default_on_invalid_type(self):
+        self.proxy._desired_handler.desired_properties = {
+            "paramPush": {"onChange": "not_a_list"}
+        }
+        result = self.proxy._get_param_push_list("onChange")
+        self.assertEqual(result, [5, 6, 7])
+
+
+class TestGetInterval(unittest.TestCase):
+    """Tests for LiftProxy._get_interval()."""
+
+    def setUp(self):
+        self.proxy = LiftProxy()
+        self.proxy._desired_handler = MagicMock()
+
+    def test_returns_twin_value(self):
+        self.proxy._desired_handler.desired_properties = {
+            "intervals": {"liftAgentPolling": 10}
+        }
+        self.assertEqual(self.proxy._get_interval("liftAgentPolling", 5), 10)
+
+    def test_returns_default_when_no_intervals(self):
+        self.proxy._desired_handler.desired_properties = {}
+        self.assertEqual(self.proxy._get_interval("liftAgentPolling", 5), 5)
+
+    def test_returns_default_when_zero(self):
+        self.proxy._desired_handler.desired_properties = {
+            "intervals": {"liftAgentPolling": 0}
+        }
+        self.assertEqual(self.proxy._get_interval("liftAgentPolling", 5), 5)
+
+    def test_returns_default_when_negative(self):
+        self.proxy._desired_handler.desired_properties = {
+            "intervals": {"liftAgentPolling": -1}
+        }
+        self.assertEqual(self.proxy._get_interval("liftAgentPolling", 5), 5)
+
+    def test_returns_default_when_desired_handler_none(self):
+        self.proxy._desired_handler = None
+        self.assertEqual(self.proxy._get_interval("liftAgentPolling", 5), 5)
+
+
+class TestSendParams(unittest.IsolatedAsyncioTestCase):
+    """Tests for LiftProxy._send_params()."""
+
+    def setUp(self):
+        self.proxy = LiftProxy()
+        self.proxy._lib = MagicMock()
+        self.proxy._event_sender = AsyncMock()
+
+    async def test_sends_event_with_changed_params(self):
+        self.proxy._lib.get_param.return_value = (42, "NO_ERR")
+        await self.proxy._send_params([5, 6])
+        self.proxy._event_sender.send_event.assert_called_once()
+        payload = self.proxy._event_sender.send_event.call_args[0][0]
+        self.assertEqual(payload["event"], "la.parameters.update")
+        self.assertEqual(payload["source"], "la.parameter.polling")
+        self.assertEqual(payload["error"], "")
+        self.assertEqual(len(payload["data"]), 2)
+        self.assertEqual(payload["data"][0]["value"], 42)
+        self.assertEqual(payload["data"][0]["parameter"], 5)
+
+    async def test_skips_params_with_errors(self):
+        def get_param_side_effect(pid):
+            if pid == 5:
+                return (42, "NO_ERR")
+            return (-1, "PARAM_NOT_SET")
+        self.proxy._lib.get_param.side_effect = get_param_side_effect
+        await self.proxy._send_params([5, 6])
+        payload = self.proxy._event_sender.send_event.call_args[0][0]
+        self.assertEqual(len(payload["data"]), 1)
+        self.assertEqual(payload["data"][0]["parameter"], 5)
+
+    async def test_no_send_when_all_params_error(self):
+        self.proxy._lib.get_param.return_value = (-1, "PARAM_NOT_SET")
+        await self.proxy._send_params([5, 6])
+        self.proxy._event_sender.send_event.assert_not_called()
+
+
+class TestPollingLoop(unittest.IsolatedAsyncioTestCase):
+    """Tests for LiftProxy._polling_loop() — runs one cycle then stops."""
+
+    def setUp(self):
+        self.proxy = LiftProxy()
+        self.proxy._lib = MagicMock()
+        self.proxy._lib.DEFAULT_ON_CHANGE_PARAMS = [5, 6, 7]
+        self.proxy._lib.get_param.return_value = (42, "NO_ERR")
+        self.proxy._handler = MagicMock()
+        self.proxy._event_sender = AsyncMock()
+        self.proxy._desired_handler = MagicMock()
+        self.proxy._desired_handler.desired_properties = {}
+
+    async def test_sends_changed_params_on_push_list(self):
+        """One cycle: poll returns [5, 6, 99], push list is [5, 6, 7] → sends [5, 6]."""
+        self.proxy._lib.poll_params = AsyncMock(return_value=[5, 6, 99])
+        cycle_count = 0
+
+        original_sleep = asyncio.sleep
+        async def mock_sleep(seconds):
+            nonlocal cycle_count
+            cycle_count += 1
+            if cycle_count >= 1:
+                raise asyncio.CancelledError
+
+        with patch("liftApi.lift_proxy.asyncio.sleep", side_effect=mock_sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.proxy._polling_loop()
+
+        self.proxy._event_sender.send_event.assert_called_once()
+        payload = self.proxy._event_sender.send_event.call_args[0][0]
+        sent_params = [d["parameter"] for d in payload["data"]]
+        self.assertEqual(sent_params, [5, 6])
+
+    async def test_no_send_when_no_changes(self):
+        """No changed params → no event sent."""
+        self.proxy._lib.poll_params = AsyncMock(return_value=[])
+        cycle_count = 0
+
+        async def mock_sleep(seconds):
+            nonlocal cycle_count
+            cycle_count += 1
+            if cycle_count >= 1:
+                raise asyncio.CancelledError
+
+        with patch("liftApi.lift_proxy.asyncio.sleep", side_effect=mock_sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.proxy._polling_loop()
+
+        self.proxy._event_sender.send_event.assert_not_called()
+
+    async def test_no_send_when_changes_not_on_push_list(self):
+        """Changed params [99, 100] not on push list [5, 6, 7] → no send."""
+        self.proxy._lib.poll_params = AsyncMock(return_value=[99, 100])
+        cycle_count = 0
+
+        async def mock_sleep(seconds):
+            nonlocal cycle_count
+            cycle_count += 1
+            if cycle_count >= 1:
+                raise asyncio.CancelledError
+
+        with patch("liftApi.lift_proxy.asyncio.sleep", side_effect=mock_sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.proxy._polling_loop()
+
+        self.proxy._event_sender.send_event.assert_not_called()
+
+
+class TestDailyLoop(unittest.IsolatedAsyncioTestCase):
+    """Tests for LiftProxy._daily_loop()."""
+
+    def setUp(self):
+        self.proxy = LiftProxy()
+        self.proxy._lib = MagicMock()
+        self.proxy._lib.DEFAULT_DAILY_PARAMS = [18, 19]
+        self.proxy._lib.get_param.return_value = (100, "NO_ERR")
+        self.proxy._handler = MagicMock()
+        self.proxy._event_sender = AsyncMock()
+        self.proxy._desired_handler = MagicMock()
+        self.proxy._desired_handler.desired_properties = {}
+
+    async def test_sleeps_first_then_reads_and_sends(self):
+        """Daily loop sleeps before first send (no immediate push on startup)."""
+        call_order = []
+
+        async def mock_sleep(seconds):
+            call_order.append("sleep")
+            raise asyncio.CancelledError
+
+        with patch("liftApi.lift_proxy.asyncio.sleep", side_effect=mock_sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.proxy._daily_loop()
+
+        # Sleep called first, before any send
+        self.assertEqual(call_order, ["sleep"])
+        self.proxy._event_sender.send_event.assert_not_called()
+
+    async def test_sends_all_daily_params_from_db(self):
+        """After sleep, sends all daily params from db (no hardware read)."""
+        cycle_count = 0
+
+        async def mock_sleep(seconds):
+            nonlocal cycle_count
+            cycle_count += 1
+            if cycle_count >= 2:
+                raise asyncio.CancelledError
+
+        with patch("liftApi.lift_proxy.asyncio.sleep", side_effect=mock_sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.proxy._daily_loop()
+
+        # Sends from db, not from handler
+        self.proxy._handler.read_parameter.assert_not_called()
+        self.proxy._event_sender.send_event.assert_called_once()
+        payload = self.proxy._event_sender.send_event.call_args[0][0]
+        sent_params = [d["parameter"] for d in payload["data"]]
+        self.assertEqual(sent_params, [18, 19])
+
+
+class TestPollParams(unittest.IsolatedAsyncioTestCase):
+    """Tests for LiftProxy.poll_params() delegation."""
+
+    def setUp(self):
+        self.proxy = LiftProxy()
+        self.proxy._lib = MagicMock()
+        self.proxy._handler = MagicMock()
+
+    async def test_delegates_to_lib(self):
+        self.proxy._lib.poll_params = AsyncMock(return_value=[5, 6])
+        result = await self.proxy.poll_params()
+        self.assertEqual(result, [5, 6])
+        self.proxy._lib.poll_params.assert_called_once_with(self.proxy._handler)
+
+    async def test_returns_empty_when_lib_none(self):
+        self.proxy._lib = None
+        result = await self.proxy.poll_params()
+        self.assertEqual(result, [])
+
+    async def test_returns_empty_when_handler_none(self):
+        self.proxy._handler = None
+        result = await self.proxy.poll_params()
+        self.assertEqual(result, [])
 
 
 if __name__ == "__main__":

@@ -5,7 +5,10 @@ All lift access (cloud, WiFi, BT) goes through this proxy.
 """
 
 import asyncio
+import time
 
+from cloudApi.device_twin_desired_handler import DeviceTwinDesiredHandler
+from cloudApi.event_sender import EventSender
 from lib.ahl_lib import AhlLib
 from lib.error_signals import LpCode
 from lib.logging_config import get_logger
@@ -18,6 +21,8 @@ logger = get_logger(__name__)
 
 IDENTIFY_MAX_RETRIES = 10
 IDENTIFY_RETRY_DELAY = 5
+DEFAULT_ON_CHANGE_INTERVAL = 5      # seconds
+DEFAULT_DAILY_INTERVAL = 86400      # 24 hours
 
 
 class LiftProxy:
@@ -35,6 +40,9 @@ class LiftProxy:
         self._handler: ModBusHandler | Rs232Handler | None = None
         self._lib: AhlLib | ThousandLib | None = None
         self._lift_type: LiftType = LiftType.UNKNOWN
+        self._event_sender: EventSender | None = None
+        self._desired_handler: DeviceTwinDesiredHandler | None = None
+        self._handler_lock: asyncio.Lock = asyncio.Lock()
 
     @classmethod
     async def create(cls) -> "LiftProxy":
@@ -65,8 +73,9 @@ class LiftProxy:
 
     async def _identify_and_init(self) -> None:
         """Create handlers, identify lift with retries, keep matched pair."""
+        thousand_lib = ThousandLib()
         modbus_handler = await asyncio.to_thread(ModBusHandler)
-        rs232_handler = await asyncio.to_thread(Rs232Handler)
+        rs232_handler = await asyncio.to_thread(Rs232Handler, thousand_lib)
 
         for attempt in range(IDENTIFY_MAX_RETRIES):
             self._lift_type = await identify_lift(modbus_handler, rs232_handler)
@@ -83,10 +92,11 @@ class LiftProxy:
             case LiftType.AHL:
                 self._handler = modbus_handler
                 self._lib = AhlLib()
+                await self._detect_ahl_polling_table()
                 logger.info("LiftProxy initialized for AHL lift")
             case LiftType.ONE_K:
                 self._handler = rs232_handler
-                self._lib = ThousandLib()
+                self._lib = thousand_lib
                 logger.info("LiftProxy initialized for 1k lift")
             case LiftType.UNKNOWN:
                 logger.error(
@@ -128,9 +138,153 @@ class LiftProxy:
         """
         if self._handler is None:
             return -1, LpCode.SOURCE.value, LpCode.INIT_ERR.name
-        status, source, code = await asyncio.to_thread(
-            self._handler.write_parameter, [param, value]
-        )
+        async with self._handler_lock:
+            status, source, code = await asyncio.to_thread(
+                self._handler.write_parameter, [param, value]
+            )
         if status == 0 and self._lib is not None:
             self._lib.set_param(int(param), int(value))
         return status, source, code
+
+    async def poll_params(self) -> list[int]:
+        """Poll lift hardware for changed parameters.
+
+        Delegates to the lib's poll_params method, which handles the
+        hardware-specific polling strategy internally (bitmask decode
+        for AHL, package-based poll for 1K).
+
+        Returns:
+            List of parameter IDs that changed since last poll.
+        """
+        if self._lib is None or self._handler is None:
+            return []
+        async with self._handler_lock:
+            return await self._lib.poll_params(self._handler)
+
+    async def run(
+        self,
+        event_sender: EventSender,
+        desired_handler: DeviceTwinDesiredHandler,
+    ) -> None:
+        """Start onChange and daily polling loops.
+
+        Args:
+            event_sender: For sending telemetry events to IoT Hub.
+            desired_handler: For reading param push lists and intervals
+                from device twin desired properties.
+        """
+        self._event_sender = event_sender
+        self._desired_handler = desired_handler
+        await asyncio.gather(
+            self._polling_loop(),
+            self._daily_loop(),
+        )
+
+    async def _polling_loop(self) -> None:
+        """Keep db fresh by polling hardware; push onChange params when they change."""
+        while True:
+            try:
+                changed = await self.poll_params()
+                if changed:
+                    push_list = self._get_param_push_list("onChange")
+                    push_set = set(push_list)
+                    to_send = [p for p in changed if p in push_set]
+                    if to_send:
+                        await self._send_params(to_send)
+            except Exception:
+                logger.exception("onChange poll cycle failed")
+            await asyncio.sleep(self._get_interval("liftAgentPolling", DEFAULT_ON_CHANGE_INTERVAL))
+
+    async def _daily_loop(self) -> None:
+        """Push all daily params from the db on a 24h schedule."""
+        while True:
+            await asyncio.sleep(self._get_interval("dailyTimer", DEFAULT_DAILY_INTERVAL))
+            try:
+                daily_list = self._get_param_push_list("daily")
+                await self._send_params(daily_list)
+            except Exception:
+                logger.exception("Daily poll cycle failed")
+
+    async def _send_params(self, param_ids: list[int]) -> None:
+        """Build and send a parameter update event from db values."""
+        assert self._event_sender is not None
+        assert self._lib is not None
+        ts = int(time.time())
+        data = []
+        for pid in param_ids:
+            value, code = self.get_param_value(pid)
+            if code == LpCode.NO_ERR:
+                data.append({"timestamp": ts, "value": value, "parameter": pid})
+        if data:
+            payload = {
+                "data": data,
+                "error": "",
+                "event": "la.parameters.update",
+                "source": "la.parameter.polling",
+            }
+            await self._event_sender.send_event(payload)
+
+    def _get_param_push_list(self, list_type: str) -> list[int]:
+        """Get param push list from desired properties, or lib defaults.
+
+        Args:
+            list_type: "onChange" or "daily".
+
+        Returns:
+            List of parameter IDs to push.
+        """
+        assert self._lib is not None
+        try:
+            if self._desired_handler is not None:
+                param_push = self._desired_handler.desired_properties.get("paramPush", {})
+                twin_list = param_push.get(list_type)
+                if isinstance(twin_list, list) and twin_list:
+                    return [int(p) for p in twin_list]
+        except (TypeError, ValueError, KeyError):
+            logger.debug("Invalid paramPush.%s in desired properties, using defaults", list_type)
+
+        if list_type == "onChange":
+            return self._lib.DEFAULT_ON_CHANGE_PARAMS
+        return self._lib.DEFAULT_DAILY_PARAMS
+
+    def _get_interval(self, key: str, default: int) -> int:
+        """Get a polling interval from desired properties, or default.
+
+        Args:
+            key: Property name under "intervals" (e.g. "liftAgentPolling").
+            default: Fallback interval in seconds.
+
+        Returns:
+            Interval in seconds.
+        """
+        try:
+            if self._desired_handler is not None:
+                intervals = self._desired_handler.desired_properties.get("intervals", {})
+                value = intervals.get(key)
+                if value is not None:
+                    interval = int(value)
+                    if interval > 0:
+                        return interval
+                    logger.warning("Invalid interval %s=%d, using default %d", key, interval, default)
+        except (TypeError, ValueError, KeyError):
+            logger.debug("Could not read intervals.%s, using default %d", key, default)
+        return default
+
+    async def _detect_ahl_polling_table(self) -> None:
+        """Detect which AHL polling table to use by reading param 127.
+
+        If param 127 is readable, the lift uses new firmware with the
+        new polling table. Otherwise, fall back to the old table.
+        """
+        assert self._handler is not None
+        assert self._lib is not None
+        value, _, code = await asyncio.to_thread(
+            self._handler.read_parameter, ["127"]
+        )
+        new_table = code == "NO_ERR"
+        self._lib.set_polling_table(new_table)  # type: ignore[union-attr]
+        logger.info(
+            "AHL polling table: %s (param 127 %s)",
+            "new" if new_table else "old",
+            "readable" if new_table else "not readable",
+        )
