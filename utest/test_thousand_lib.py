@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import asyncio
 import sys
 import os
 
@@ -2204,6 +2205,58 @@ class TestThousandLib(unittest.TestCase):
 
         for signal in self.tl.params_135:
             assert self.tl.database[signal.value].value == '0'
+
+
+def async_test(coro):
+    def wrapper(*args, **kwargs):
+        return asyncio.run(coro(*args, **kwargs))
+    return wrapper
+
+
+class TestThousandLibPollParams(unittest.TestCase):
+    """Tests for ThousandLib.poll_params() — unified polling interface."""
+
+    def setUp(self):
+        from lib.error_signals import Rs232Code
+        self.Rs232Code = Rs232Code
+        self.tl = ThousandLib()
+        self.handler = MagicMock()
+
+    @async_test
+    async def test_returns_changed_param_ids(self):
+        """Parses 'x'-separated response into param ID list."""
+        self.handler.poll_lift.return_value = ("10x42x55", "Rs232Handler", self.Rs232Code.NO_ERR.name)
+        result = await self.tl.poll_params(self.handler)
+        self.assertEqual(result, [10, 42, 55])
+        self.handler.poll_lift.assert_called_once_with(["0"])
+
+    @async_test
+    async def test_no_updated_params_returns_empty(self):
+        """NO_UPDATED_PARAMS code with '0' response returns empty."""
+        self.handler.poll_lift.return_value = ("0", "Rs232Handler", self.Rs232Code.NO_UPDATED_PARAMS.name)
+        result = await self.tl.poll_params(self.handler)
+        self.assertEqual(result, [])
+
+    @async_test
+    async def test_com_error_returns_empty(self):
+        """Communication error returns empty list."""
+        self.handler.poll_lift.return_value = (-1, "Rs232Handler", self.Rs232Code.SERIAL_COM_ERR.name)
+        result = await self.tl.poll_params(self.handler)
+        self.assertEqual(result, [])
+
+    @async_test
+    async def test_partial_err_still_returns_params(self):
+        """PARTIAL_ERR means some packages failed but changed params are still returned."""
+        self.handler.poll_lift.return_value = ("10x42", "Rs232Handler", self.Rs232Code.PARTIAL_ERR.name)
+        result = await self.tl.poll_params(self.handler)
+        self.assertEqual(result, [10, 42])
+
+    @async_test
+    async def test_single_param_returned(self):
+        """Single changed param (no 'x' separator)."""
+        self.handler.poll_lift.return_value = ("10", "Rs232Handler", self.Rs232Code.NO_ERR.name)
+        result = await self.tl.poll_params(self.handler)
+        self.assertEqual(result, [10])
 
 
 def set_up_mocked_database():

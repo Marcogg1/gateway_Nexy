@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import asyncio
 import logging
 import os
 import sys
@@ -21,6 +22,21 @@ class ThousandLib:
     """
     Class contains database and functionality for unpacking 1k lift signals.
     """
+
+    DEFAULT_ON_CHANGE_PARAMS: list[int] = [
+        10, 11, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
+        58, 59, 60, 61, 62, 63, 64, 65,
+        97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108,
+        109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120,
+        121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132,
+        133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 145,
+        152, 153, 154, 161, 162, 163, 164, 165, 166, 167, 168,
+    ]
+
+    DEFAULT_DAILY_PARAMS: list[int] = [
+        66, 67, 173, 174, 175, 176, 177, 178, 179, 180, 181,
+    ]
+
     def __init__(self) -> None:
         self.name: str = 'ThousandLib'
         self.logger = logger
@@ -90,6 +106,36 @@ class ThousandLib:
         except Exception:
             self.logger.error(f"Param {param} not in 1k database")
             return [], self.rs232Codes.PARAM_NOT_IN_DB.name
+
+    async def poll_params(self, handler: Any) -> list[int]:
+        """Poll 1K lift for changed parameters.
+
+        Calls handler.poll_lift which reads all RS232 packages and
+        updates the shared database directly (handler and proxy share
+        the same ThousandLib instance).
+
+        Args:
+            handler: Rs232Handler instance for hardware communication.
+
+        Returns:
+            List of parameter IDs whose values changed.
+        """
+        response, _, code = await asyncio.to_thread(
+            handler.poll_lift, ["0"]
+        )
+        if code != Rs232Code.NO_ERR.name and code != Rs232Code.PARTIAL_ERR.name:
+            if code != Rs232Code.NO_UPDATED_PARAMS.name:
+                self.logger.warning("poll_lift failed: %s", code)
+            return []
+
+        if response == "0" or response == -1:
+            return []
+
+        try:
+            return [int(p) for p in str(response).split("x") if p]
+        except ValueError:
+            self.logger.error("Failed to parse poll_lift response: %s", response)
+            return []
 
     def get_file_for_param(self, param: int) -> str:
         """
