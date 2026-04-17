@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import asyncio
 import os
 import sys
 from enum import Enum
@@ -18,6 +19,52 @@ logger = get_logger(__name__)
 class AhlLib:
     """Database and functionality for AHL (Aritco Home Lift) series parameters."""
 
+    _OLD_POLLING_TABLE: dict[int, list[int]] = {
+        0: [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+        1: list(range(16, 32)),
+        2: list(range(32, 48)),
+        3: list(range(48, 64)),
+        4: list(range(64, 80)),
+        5: list(range(80, 94)),
+        6: list(range(94, 110)),
+        7: list(range(110, 126)),
+        8: [126] + list(range(353, 368)),
+        **{bit: list(range(224 + bit * 16, 224 + bit * 16 + 16)) for bit in range(9, 31)},
+    }
+
+    _NEW_POLLING_TABLE: dict[int, list[int]] = {
+        0: [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+        1: list(range(16, 32)),
+        2: list(range(32, 48)),
+        3: list(range(48, 64)),
+        4: list(range(64, 80)),
+        5: list(range(80, 94)),
+        6: list(range(94, 110)),
+        7: list(range(110, 126)),
+        8: [126, 127, 128, 129] + list(range(353, 365)),
+        **{bit: list(range(-14 + bit * 16, -14 + bit * 16 + 16)) for bit in range(9, 21)},
+        21: list(range(322, 334)) + [335, 336, 338, 339],
+        22: [340, 344, 345] + list(range(347, 353)) + list(range(365, 372)),
+        **{bit: list(range(4 + bit * 16, 4 + bit * 16 + 16)) for bit in range(23, 31)},
+    }
+
+    DEFAULT_ON_CHANGE_PARAMS: list[int] = [
+        5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 20, 25,
+        32, 33, 34, 37, 38, 39, 40, 41, 42, 43, 60, 97, 99, 100, 101,
+        107, 108, 109, 111, 353, 357, 360, 362, 364,
+        375, 376, 377, 378, 379, 380, 381,
+        127, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140,
+        143, 147, 151, 155, 159, 163, 167, 171, 175, 179, 183, 187, 191,
+        195, 199, 203, 207, 211, 215, 219, 223, 227, 231, 235, 239, 243,
+        247, 251, 255, 259, 263, 267, 271, 275, 279, 283, 287, 291, 295,
+        299, 303, 307, 311, 315, 319, 323, 327, 329, 330, 331, 332, 333,
+        335, 336, 347, 348, 349, 350, 351,
+    ]
+
+    DEFAULT_DAILY_PARAMS: list[int] = [
+        18, 19, 46, 48, 50, 52, 54, 56, 58, 59, 88, 89, 352,
+    ]
+
     def __init__(self) -> None:
         self.name: str = 'AhlLib'
         self.logger = logger
@@ -35,6 +82,7 @@ class AhlLib:
         self.params_alarm_details: Type[AhlParamAlarmDetails] = AhlParamAlarmDetails
         self.__init_database()
         self.error_codes = MbCode
+        self._polling_table: dict[int, list[int]] = self._OLD_POLLING_TABLE
 
     def get_param(self, param: int) -> tuple[Any, str]:
         """Return a parameter if it exists in the database.
@@ -75,6 +123,70 @@ class AhlLib:
 
         self.database[param].value = value
         return [param], self.error_codes.NO_ERR.name
+
+    def set_polling_table(self, new_table: bool) -> None:
+        """Select which polling table to use based on firmware version.
+
+        Args:
+            new_table: True for new firmware (param 127 readable), False for old.
+        """
+        self._polling_table = self._NEW_POLLING_TABLE if new_table else self._OLD_POLLING_TABLE
+
+    def decode_change_flags(self, bitmask: int) -> list[int]:
+        """Decode the 31-bit PARAM_POLLING bitmask into parameter IDs.
+
+        Args:
+            bitmask: Integer value read from PARAM_POLLING (register 2).
+
+        Returns:
+            List of parameter IDs that have changed, ordered by bit index.
+        """
+        changed: list[int] = []
+        for bit in range(31):
+            if bitmask & (1 << bit):
+                changed.extend(self._polling_table.get(bit, []))
+        return changed
+
+    async def poll_params(self, handler: Any) -> list[int]:
+        """Poll AHL lift for changed parameters via bitmask.
+
+        Reads PARAM_POLLING (register 2), decodes the bitmask to find
+        which parameter groups changed, reads each changed param from
+        hardware, and updates the local database.
+
+        Args:
+            handler: ModBusHandler instance for hardware communication.
+
+        Returns:
+            List of parameter IDs whose values actually changed.
+        """
+        # Read the change-flags bitmask (param 2)
+        value, _, code = await asyncio.to_thread(
+            handler.read_parameter, ["2"]
+        )
+        if code != MbCode.NO_ERR.name:
+            self.logger.warning("Failed to read PARAM_POLLING: %s", code)
+            return []
+
+        bitmask = int(value)
+        if bitmask == 0:
+            return []
+
+        candidate_params = self.decode_change_flags(bitmask)
+        changed: list[int] = []
+
+        for param_id in candidate_params:
+            if param_id not in self.database:
+                continue
+            val, _, read_code = await asyncio.to_thread(
+                handler.read_parameter, [str(param_id)]
+            )
+            if read_code != MbCode.NO_ERR.name:
+                continue
+            updated, _ = self.set_param(param_id, int(val))
+            changed.extend(updated)
+
+        return changed
 
     def available_params(self) -> KeysView[int]:
         """Get list of all available parameters.
