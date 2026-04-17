@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-import asyncio
 import datetime
 import logging
 import sys
@@ -24,9 +23,11 @@ logger = get_logger(__name__)
 
 class Rs232Handler:
 
-    def __init__(self) -> None:
-        """
-        Initializes the rs232 serial client and variables
+    def __init__(self, tl: ThousandLib) -> None:
+        """Initializes the rs232 serial client and variables.
+
+        Args:
+            tl: ThousandLib instance (shared with LiftProxy).
         """
         self.rs232Codes = Rs232Code
         self.name: str = self.rs232Codes.SOURCE.value
@@ -53,7 +54,7 @@ class Rs232Handler:
         self.doorOpenCount_version_limits: list = ["4.7", "1.2"]
         self.logfile_length_version_limits: list = ["4.7", "1.3"]
 
-        self.tl: ThousandLib = ThousandLib()
+        self.tl: ThousandLib = tl
 
         try:
             self.client: serial.Serial = serial.Serial(port=self.rs_port,
@@ -1812,143 +1813,3 @@ if __name__ == "__main__":
             logger.info(response)
 
 
-class Rs232HandlerAsync:
-    """
-    Async wrapper around Rs232Handler that provides periodic polling functionality.
-    
-    This class wraps the synchronous Rs232Handler and provides async polling
-    with automatic scheduling every 5 seconds. It ensures only one poll
-    cycle executes at a time using an asyncio.Lock.
-    """
-    
-    def __init__(self, rs232_handler: Rs232Handler | None = None) -> None:
-        """
-        Initialize the async wrapper.
-        
-        Args:
-            rs232_handler: Optional Rs232Handler instance. If None, a new one will be created.
-        """
-        self.rs232_handler = rs232_handler if rs232_handler else Rs232Handler()
-        self.logger = logger
-        self._polling_task: Any = None
-        self._poll_lock: Any = None  # Will be initialized in async context
-        self._running = False
-        self.poll_interval = 5  # seconds
-        
-    async def _initialize_lock(self) -> None:
-        """Initialize the asyncio lock in async context."""
-        if self._poll_lock is None:
-            self._poll_lock = asyncio.Lock()
-    
-    async def poll_lift(self, poll_type: str = '0') -> tuple[Any, str, str]:
-        """
-        Execute a single poll cycle asynchronously.
-        
-        This method wraps the synchronous poll_lift call and ensures only one
-        poll executes at a time using an asyncio.Lock.
-        
-        Args:
-            poll_type: '0' for reading one file package per poll,
-                      '1' for reading all file packages per poll
-                      
-        Returns:
-            Tuple of (response, name, error_code) from the poll operation
-        """
-        
-        await self._initialize_lock()
-        
-        # Acquire lock to ensure only one poll at a time
-        async with self._poll_lock:
-            self.logger.debug(f"Starting poll_lift with poll_type={poll_type}")
-            
-            # Run the synchronous poll_lift in a thread pool to avoid blocking
-            loop = asyncio.get_event_loop()
-            response, name, err_code = await loop.run_in_executor(
-                None, 
-                self.rs232_handler.poll_lift,
-                [poll_type]
-                )
-            
-            self.logger.debug(f"Completed poll_lift: err_code={err_code}")
-            return response, name, err_code
-    
-    async def _polling_loop(self, poll_type: str = '0') -> None:
-        """
-        Internal polling loop that runs continuously at the specified interval.
-        
-        Args:
-            poll_type: '0' for reading one file package per poll,
-                      '1' for reading all file packages per poll
-        """
-        
-        self.logger.info(f"Starting polling loop with {self.poll_interval}s interval, poll_type={poll_type}")
-        
-        while self._running:
-            try:
-                response, name, err_code = await self.poll_lift(poll_type)
-                
-                if err_code != self.rs232_handler.rs232Codes.NO_ERR.name:
-                    if err_code != self.rs232_handler.rs232Codes.NO_UPDATED_PARAMS.name:
-                        self.logger.warning(f"Poll completed with error: {err_code}")
-                else:
-                    self.logger.debug(f"Poll completed successfully")
-                    
-            except Exception as e:
-                self.logger.error(f"Error during polling: {e}", exc_info=True)
-            
-            # Wait for the next poll interval
-            await asyncio.sleep(self.poll_interval)
-    
-    async def start_polling(self, poll_type: str = '0') -> None:
-        """
-        Start the automatic polling loop.
-        
-        This method starts a background task that polls the lift every 5 seconds.
-        If polling is already running, this method does nothing.
-        
-        Args:
-            poll_type: '0' for reading one file package per poll (default),
-                      '1' for reading all file packages per poll
-        """
-        
-        if self._running:
-            self.logger.warning("Polling is already running")
-            return
-        
-        await self._initialize_lock()
-        self._running = True
-        self._polling_task = asyncio.create_task(self._polling_loop(poll_type))
-        self.logger.info("Polling started")
-    
-    async def stop_polling(self) -> None:
-        """
-        Stop the automatic polling loop.
-        
-        This method gracefully stops the polling task and waits for any
-        in-progress poll to complete.
-        """
-        if not self._running:
-            self.logger.warning("Polling is not running")
-            return
-        
-        self.logger.info("Stopping polling...")
-        self._running = False
-        
-        if self._polling_task:
-            self._polling_task.cancel()
-            try:
-                await self._polling_task
-            except asyncio.CancelledError:
-                pass  # Task cancellation is expected
-            self._polling_task = None
-        
-        self.logger.info("Polling stopped")
-    
-    def is_polling(self) -> bool:
-        """
-        Check if polling is currently active.
-        
-        Returns:
-            True if polling is running, False otherwise
-        """
-        return self._running
