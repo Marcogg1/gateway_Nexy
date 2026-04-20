@@ -1752,7 +1752,7 @@ def get_and_save_prod_loader_params() -> Any:
     prodLoadParaValue: dict[str, Any] = prodLoadParaNo
     double_doors_value: list = []
 
-    rs232: Rs232Handler = Rs232Handler()
+    rs232: Rs232Handler = Rs232Handler(ThousandLib())
     arg_in: list = ['1']
     res, _, err_code = rs232.poll_lift(arg_in)
 
@@ -1783,7 +1783,7 @@ def get_and_save_prod_loader_params() -> Any:
 
 if __name__ == "__main__":
 
-    obj: Rs232Handler = Rs232Handler()
+    obj: Rs232Handler = Rs232Handler(ThousandLib())
     input: str = sys.argv[1]
     logger.info(input)
     if (input == "production_test"):
