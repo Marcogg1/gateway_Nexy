@@ -132,6 +132,7 @@ class ThousandLib:
             return []
 
         try:
+            # poll_lift returns changed param IDs joined by 'x', e.g. '10x42x55'.
             return [int(p) for p in str(response).split("x") if p]
         except ValueError:
             self.logger.error("Failed to parse poll_lift response: %s", response)

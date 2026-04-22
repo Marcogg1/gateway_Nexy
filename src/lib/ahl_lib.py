@@ -19,6 +19,7 @@ logger = get_logger(__name__)
 class AhlLib:
     """Database and functionality for AHL (Aritco Home Lift) series parameters."""
 
+    # Bit 0 intentionally omits param 2 (PARAM_POLLING register used to read the bitmask).
     _OLD_POLLING_TABLE: dict[int, list[int]] = {
         0: [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
         1: list(range(16, 32)),
@@ -32,6 +33,7 @@ class AhlLib:
         **{bit: list(range(224 + bit * 16, 224 + bit * 16 + 16)) for bit in range(9, 31)},
     }
 
+    # Bit 0 intentionally omits param 2 (PARAM_POLLING register used to read the bitmask).
     _NEW_POLLING_TABLE: dict[int, list[int]] = {
         0: [0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
         1: list(range(16, 32)),

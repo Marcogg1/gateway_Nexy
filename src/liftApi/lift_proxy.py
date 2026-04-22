@@ -91,8 +91,9 @@ class LiftProxy:
         match self._lift_type:
             case LiftType.AHL:
                 self._handler = modbus_handler
-                self._lib = AhlLib()
-                await self._detect_ahl_polling_table()
+                ahl_lib = AhlLib()
+                self._lib = ahl_lib
+                await self._detect_ahl_polling_table(ahl_lib)
                 logger.info("LiftProxy initialized for AHL lift")
             case LiftType.ONE_K:
                 self._handler = rs232_handler
@@ -193,6 +194,7 @@ class LiftProxy:
                         await self._send_params(to_send)
             except Exception:
                 logger.exception("onChange poll cycle failed")
+            # Sleep after work so first poll runs immediately on startup.
             await asyncio.sleep(self._get_interval("liftAgentPolling", DEFAULT_ON_CHANGE_INTERVAL))
 
     async def _daily_loop(self) -> None:
@@ -207,8 +209,9 @@ class LiftProxy:
 
     async def _send_params(self, param_ids: list[int]) -> None:
         """Build and send a parameter update event from db values."""
-        assert self._event_sender is not None
-        assert self._lib is not None
+        if self._event_sender is None or self._lib is None:
+            logger.error("_send_params called before proxy is initialised")
+            return
         ts = int(time.time())
         data = []
         for pid in param_ids:
@@ -233,7 +236,9 @@ class LiftProxy:
         Returns:
             List of parameter IDs to push.
         """
-        assert self._lib is not None
+        if self._lib is None:
+            logger.error("_get_param_push_list called before proxy is initialised")
+            return []
         try:
             if self._desired_handler is not None:
                 param_push = self._desired_handler.desired_properties.get("paramPush", {})
@@ -270,19 +275,23 @@ class LiftProxy:
             logger.debug("Could not read intervals.%s, using default %d", key, default)
         return default
 
-    async def _detect_ahl_polling_table(self) -> None:
+    async def _detect_ahl_polling_table(self, lib: AhlLib) -> None:
         """Detect which AHL polling table to use by reading param 127.
 
         If param 127 is readable, the lift uses new firmware with the
         new polling table. Otherwise, fall back to the old table.
+
+        Args:
+            lib: The AhlLib instance whose polling table should be configured.
         """
-        assert self._handler is not None
-        assert self._lib is not None
+        if self._handler is None:
+            logger.error("_detect_ahl_polling_table called without handler")
+            return
         value, _, code = await asyncio.to_thread(
             self._handler.read_parameter, ["127"]
         )
         new_table = code == "NO_ERR"
-        self._lib.set_polling_table(new_table)  # type: ignore[union-attr]
+        lib.set_polling_table(new_table)
         logger.info(
             "AHL polling table: %s (param 127 %s)",
             "new" if new_table else "old",
