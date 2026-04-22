@@ -571,5 +571,136 @@ class TestPollParams(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, [])
 
 
+class TestLiftProxyIdleSupervisor(LiftProxyTestBase):
+    """Tests for idle_supervisor wiring in LiftProxy."""
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_idle_supervisor_defaults_to_none(self, mock_identify):
+        mock_identify.return_value = LiftType.AHL
+        proxy = await LiftProxy.create()
+        self.assertIsNone(proxy._idle_supervisor)
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_idle_supervisor_stored_when_passed(self, mock_identify):
+        mock_identify.return_value = LiftType.AHL
+        supervisor = MagicMock()
+        proxy = await LiftProxy.create(idle_supervisor=supervisor)
+        self.assertIs(proxy._idle_supervisor, supervisor)
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_polling_loop_invokes_supervisor_on_change(self, mock_identify):
+        """One poll cycle with changes → supervisor.on_param_changes called once."""
+        from liftApi.idle_supervisor import ParamChange
+        mock_identify.return_value = LiftType.AHL
+        supervisor = MagicMock()
+        proxy = await LiftProxy.create(idle_supervisor=supervisor)
+
+        proxy.poll_params = AsyncMock(return_value=[22, 23])
+        self.MockAhlLib.return_value.get_param.side_effect = [
+            (100, "NO_ERR"),
+            (200, "NO_ERR"),
+        ]
+
+        with patch(
+            "liftApi.lift_proxy.asyncio.sleep",
+            new_callable=AsyncMock,
+            side_effect=asyncio.CancelledError,
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await proxy._polling_loop()
+
+        supervisor.on_param_changes.assert_called_once_with([
+            ParamChange(22, 100),
+            ParamChange(23, 200),
+        ])
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_polling_loop_skips_supervisor_when_no_changes(self, mock_identify):
+        mock_identify.return_value = LiftType.AHL
+        supervisor = MagicMock()
+        proxy = await LiftProxy.create(idle_supervisor=supervisor)
+
+        proxy.poll_params = AsyncMock(return_value=[])
+
+        with patch(
+            "liftApi.lift_proxy.asyncio.sleep",
+            new_callable=AsyncMock,
+            side_effect=asyncio.CancelledError,
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await proxy._polling_loop()
+
+        supervisor.on_param_changes.assert_not_called()
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_polling_loop_works_without_supervisor(self, mock_identify):
+        mock_identify.return_value = LiftType.AHL
+        proxy = await LiftProxy.create(idle_supervisor=None)
+
+        proxy.poll_params = AsyncMock(return_value=[22])
+        self.MockAhlLib.return_value.get_param.return_value = (100, "NO_ERR")
+
+        with patch(
+            "liftApi.lift_proxy.asyncio.sleep",
+            new_callable=AsyncMock,
+            side_effect=asyncio.CancelledError,
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await proxy._polling_loop()
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_supervisor_exception_does_not_crash_polling_loop(self, mock_identify):
+        """Supervisor raising must be caught; loop continues."""
+        mock_identify.return_value = LiftType.AHL
+        supervisor = MagicMock()
+        supervisor.on_param_changes.side_effect = RuntimeError("boom")
+        proxy = await LiftProxy.create(idle_supervisor=supervisor)
+
+        proxy.poll_params = AsyncMock(return_value=[22])
+        self.MockAhlLib.return_value.get_param.return_value = (100, "NO_ERR")
+
+        with self.assertLogs("liftApi.lift_proxy", level="ERROR") as cm:
+            with patch(
+                "liftApi.lift_proxy.asyncio.sleep",
+                new_callable=AsyncMock,
+                side_effect=asyncio.CancelledError,
+            ):
+                with self.assertRaises(asyncio.CancelledError):
+                    await proxy._polling_loop()
+
+        self.assertTrue(
+            any("IdleSupervisor failed" in line for line in cm.output),
+            f"Expected 'IdleSupervisor failed' in logs, got: {cm.output}",
+        )
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_polling_loop_skips_ids_with_get_param_error(self, mock_identify):
+        """Ids whose get_param returns non-NO_ERR are omitted from the ParamChange list."""
+        from liftApi.idle_supervisor import ParamChange
+        mock_identify.return_value = LiftType.AHL
+        supervisor = MagicMock()
+        proxy = await LiftProxy.create(idle_supervisor=supervisor)
+
+        proxy.poll_params = AsyncMock(return_value=[22, 23, 24])
+        self.MockAhlLib.return_value.get_param.side_effect = [
+            (100, "NO_ERR"),
+            (None, "PARAM_NOT_SET"),
+            (300, "NO_ERR"),
+        ]
+
+        with patch(
+            "liftApi.lift_proxy.asyncio.sleep",
+            new_callable=AsyncMock,
+            side_effect=asyncio.CancelledError,
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await proxy._polling_loop()
+
+        supervisor.on_param_changes.assert_called_once_with([
+            ParamChange(22, 100),
+            ParamChange(24, 300),
+        ])
+
+
 if __name__ == "__main__":
     unittest.main()

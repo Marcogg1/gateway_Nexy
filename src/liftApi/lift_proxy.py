@@ -13,6 +13,7 @@ from lib.ahl_lib import AhlLib
 from lib.error_signals import LpCode
 from lib.logging_config import get_logger
 from lib.thousand_lib import ThousandLib
+from liftApi.idle_supervisor import IdleSupervisor
 from liftApi.lift_identifier import LiftType, identify_lift
 from liftApi.modbus_handler import ModBusHandler
 from liftApi.rs232_handler import Rs232Handler
@@ -36,23 +37,32 @@ class LiftProxy:
         proxy = await LiftProxy.create()
     """
 
-    def __init__(self) -> None:
+    def __init__(self, idle_supervisor: IdleSupervisor | None = None) -> None:
         self._handler: ModBusHandler | Rs232Handler | None = None
         self._lib: AhlLib | ThousandLib | None = None
         self._lift_type: LiftType = LiftType.UNKNOWN
         self._event_sender: EventSender | None = None
         self._desired_handler: DeviceTwinDesiredHandler | None = None
         self._handler_lock: asyncio.Lock = asyncio.Lock()
+        self._idle_supervisor: IdleSupervisor | None = idle_supervisor
 
     @classmethod
-    async def create(cls) -> "LiftProxy":
+    async def create(
+        cls,
+        idle_supervisor: IdleSupervisor | None = None,
+    ) -> "LiftProxy":
         """Async factory — creates handlers, identifies lift, keeps matched pair.
+
+        Args:
+            idle_supervisor: Optional observer notified of parameter changes
+                after each poll cycle. If omitted, the proxy runs without
+                supervision (useful in tests and minimal startup paths).
 
         Returns:
             Initialized LiftProxy with the correct handler + lib for the
             connected lift, or UNKNOWN if neither responds.
         """
-        proxy = cls()
+        proxy = cls(idle_supervisor=idle_supervisor)
         await proxy._identify_and_init()
         return proxy
 
@@ -182,11 +192,12 @@ class LiftProxy:
         )
 
     async def _polling_loop(self) -> None:
-        """Keep db fresh by polling hardware; push onChange params when they change."""
+        """Keep db fresh by polling hardware; push onChange params, notify supervisor."""
         while True:
             try:
                 changed = await self.poll_params()
                 if changed:
+                    self._notify_supervisor(changed)
                     push_list = self._get_param_push_list("onChange")
                     push_set = set(push_list)
                     to_send = [p for p in changed if p in push_set]
@@ -196,6 +207,29 @@ class LiftProxy:
                 logger.exception("onChange poll cycle failed")
             # Sleep after work so first poll runs immediately on startup.
             await asyncio.sleep(self._get_interval("liftAgentPolling", DEFAULT_ON_CHANGE_INTERVAL))
+
+    def _notify_supervisor(self, changed_ids: list[int]) -> None:
+        """Build ParamChange list from changed ids and hand it to the supervisor.
+
+        Reads the current cache value for each id (the new value, just written
+        by lib.poll_params). Changes whose get_param returns a non-NO_ERR code
+        are skipped. The supervisor call is bulkheaded: a raising supervisor
+        never crashes the poll loop.
+        """
+        if self._idle_supervisor is None or self._lib is None:
+            return
+        from liftApi.idle_supervisor import ParamChange
+        changes: list[ParamChange] = []
+        for pid in changed_ids:
+            value, code = self._lib.get_param(pid)
+            if code == LpCode.NO_ERR.name:
+                changes.append(ParamChange(pid, value))
+        if not changes:
+            return
+        try:
+            self._idle_supervisor.on_param_changes(changes)
+        except Exception:
+            logger.exception("IdleSupervisor failed")
 
     async def _daily_loop(self) -> None:
         """Push all daily params from the db on a 24h schedule."""

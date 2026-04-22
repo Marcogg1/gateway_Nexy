@@ -9,6 +9,7 @@ from cloudApi.device_twin_desired_handler import DeviceTwinDesiredHandler
 from liftApi.lift_simulator import LiftSimulator
 from liftApi.lift_proxy import LiftProxy
 from liftApi.lift_identifier import LiftType
+from liftApi.idle_supervisor import IdleSupervisor
 from lib.logging_config import setup_logging, get_logger
 
 # Setup logging at module level
@@ -43,7 +44,8 @@ async def main():
 
     # Initialize lift proxy (creates handlers, identifies lift type)
     try:
-        proxy = await LiftProxy.create()
+        idle_supervisor = IdleSupervisor()
+        proxy = await LiftProxy.create(idle_supervisor=idle_supervisor)
         if proxy.lift_type == LiftType.UNKNOWN:
             logger.error("Could not identify lift type, exiting")
             return
