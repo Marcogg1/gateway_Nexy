@@ -13,7 +13,7 @@ from lib.ahl_lib import AhlLib
 from lib.error_signals import LpCode
 from lib.logging_config import get_logger
 from lib.thousand_lib import ThousandLib
-from liftApi.idle_supervisor import IdleSupervisor
+from liftApi.idle_supervisor import IdleSupervisor, ParamChange
 from liftApi.lift_identifier import LiftType, identify_lift
 from liftApi.modbus_handler import ModBusHandler
 from liftApi.rs232_handler import Rs232Handler
@@ -197,7 +197,7 @@ class LiftProxy:
             try:
                 changed = await self.poll_params()
                 if changed:
-                    self._notify_supervisor(changed)
+                    await self._notify_supervisor(changed)
                     push_list = self._get_param_push_list("onChange")
                     push_set = set(push_list)
                     to_send = [p for p in changed if p in push_set]
@@ -208,7 +208,7 @@ class LiftProxy:
             # Sleep after work so first poll runs immediately on startup.
             await asyncio.sleep(self._get_interval("liftAgentPolling", DEFAULT_ON_CHANGE_INTERVAL))
 
-    def _notify_supervisor(self, changed_ids: list[int]) -> None:
+    async def _notify_supervisor(self, changed_ids: list[int]) -> None:
         """Build ParamChange list from changed ids and hand it to the supervisor.
 
         Reads the current cache value for each id (the new value, just written
@@ -218,7 +218,6 @@ class LiftProxy:
         """
         if self._idle_supervisor is None or self._lib is None:
             return
-        from liftApi.idle_supervisor import ParamChange
         changes: list[ParamChange] = []
         for pid in changed_ids:
             value, code = self._lib.get_param(pid)
@@ -227,7 +226,7 @@ class LiftProxy:
         if not changes:
             return
         try:
-            self._idle_supervisor.on_param_changes(changes)
+            await self._idle_supervisor.on_param_changes(changes)
         except Exception:
             logger.exception("IdleSupervisor failed")
 

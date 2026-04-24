@@ -4,6 +4,7 @@ Future: evaluate criteria and initiate triggered functionality.
 """
 
 from dataclasses import dataclass
+from typing import Any
 
 from lib.logging_config import get_logger
 
@@ -15,14 +16,17 @@ class ParamChange:
     """A single parameter update detected during a poll cycle."""
 
     param_id: int
-    new_value: object | None
+    new_value: Any
 
 
 class IdleSupervisor:
     """Receives parameter updates from LiftProxy and logs them."""
 
-    def on_param_changes(self, changes: list[ParamChange]) -> None:
+    async def on_param_changes(self, changes: list[ParamChange]) -> None:
         """Log each parameter change at INFO level.
+
+        Async so future implementations can do I/O (enqueue, call APIs)
+        without blocking the polling loop.
 
         Args:
             changes: List of ParamChange entries from the latest poll.

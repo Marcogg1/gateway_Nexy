@@ -50,4 +50,5 @@ Each handler has an error enum in `error_signals.py` with a `SOURCE` attribute f
 - **Google docstrings** for all functions and classes
 - Type hints required: use `str | None` not `Optional[str]`
 - All I/O operations use async/await
+- Callbacks/hooks invoked from async loops use `async def` even if body is sync — prevents blocking when impl grows I/O
 - Tests use `unittest` with `setUp`/`tearDown` (not pytest fixtures)

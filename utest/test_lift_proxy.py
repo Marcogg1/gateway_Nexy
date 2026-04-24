@@ -593,6 +593,7 @@ class TestLiftProxyIdleSupervisor(LiftProxyTestBase):
         from liftApi.idle_supervisor import ParamChange
         mock_identify.return_value = LiftType.AHL
         supervisor = MagicMock()
+        supervisor.on_param_changes = AsyncMock()
         proxy = await LiftProxy.create(idle_supervisor=supervisor)
 
         proxy.poll_params = AsyncMock(return_value=[22, 23])
@@ -618,6 +619,7 @@ class TestLiftProxyIdleSupervisor(LiftProxyTestBase):
     async def test_polling_loop_skips_supervisor_when_no_changes(self, mock_identify):
         mock_identify.return_value = LiftType.AHL
         supervisor = MagicMock()
+        supervisor.on_param_changes = AsyncMock()
         proxy = await LiftProxy.create(idle_supervisor=supervisor)
 
         proxy.poll_params = AsyncMock(return_value=[])
@@ -653,7 +655,7 @@ class TestLiftProxyIdleSupervisor(LiftProxyTestBase):
         """Supervisor raising must be caught; loop continues."""
         mock_identify.return_value = LiftType.AHL
         supervisor = MagicMock()
-        supervisor.on_param_changes.side_effect = RuntimeError("boom")
+        supervisor.on_param_changes = AsyncMock(side_effect=RuntimeError("boom"))
         proxy = await LiftProxy.create(idle_supervisor=supervisor)
 
         proxy.poll_params = AsyncMock(return_value=[22])
@@ -679,6 +681,7 @@ class TestLiftProxyIdleSupervisor(LiftProxyTestBase):
         from liftApi.idle_supervisor import ParamChange
         mock_identify.return_value = LiftType.AHL
         supervisor = MagicMock()
+        supervisor.on_param_changes = AsyncMock()
         proxy = await LiftProxy.create(idle_supervisor=supervisor)
 
         proxy.poll_params = AsyncMock(return_value=[22, 23, 24])
