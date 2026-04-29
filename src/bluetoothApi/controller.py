@@ -55,9 +55,22 @@ class WifiController:
         self._status = Status(last_updated_ms=self._clock())
         self._lock = asyncio.Lock()
         self._heartbeat_task: asyncio.Task | None = None
+        # Cached JSON snapshot for the sync READ path. Updated atomically on
+        # every state mutation under the lock.
+        self._latest_status_json: bytes = self._status.to_json()
+
+    def latest_status_json(self) -> bytes:
+        """Return the cached full Status JSON (sync — for BLE READ path).
+
+        The SDK calls characteristic on_read callbacks synchronously and
+        expects bytes back immediately. The snapshot is updated atomically
+        on every state change under the lock; reading the bytes attribute
+        is a single Python read so no race occurs.
+        """
+        return self._latest_status_json
 
     async def get_status_json(self) -> bytes:
-        """Return the full Status as compact JSON. Used by the BLE READ path."""
+        """Async accessor for tests; equivalent to `latest_status_json()`."""
         async with self._lock:
             return self._status.to_json()
 
@@ -66,8 +79,7 @@ class WifiController:
         async with self._lock:
             if self._status.phase in (Phase.SCANNING, Phase.CONNECTING) and not force:
                 return
-            self._status = self._with_phase(Phase.SCANNING)
-            tick = self._status.to_tick_json()
+            tick = self._commit(self._with_phase(Phase.SCANNING))
         await self._emit(tick)
 
         try:
@@ -78,11 +90,12 @@ class WifiController:
             return
 
         async with self._lock:
-            self._status = self._with_phase(
-                Phase.IDLE,
-                networks=networks[:MAX_NETWORKS_IN_STATUS],
+            tick = self._commit(
+                self._with_phase(
+                    Phase.IDLE,
+                    networks=networks[:MAX_NETWORKS_IN_STATUS],
+                )
             )
-            tick = self._status.to_tick_json()
         await self._emit(tick)
 
     async def request_connect(self, ssid: str, psk: str, iface: str) -> None:
@@ -95,14 +108,15 @@ class WifiController:
 
         if iface == "ppp0":
             async with self._lock:
-                self._status = Status(
-                    seq=self._status.seq + 1,
-                    phase=Phase.CONNECTED,
-                    iface="ppp0",
-                    networks=self._status.networks,
-                    last_updated_ms=self._clock(),
+                tick = self._commit(
+                    Status(
+                        seq=self._status.seq + 1,
+                        phase=Phase.CONNECTED,
+                        iface="ppp0",
+                        networks=self._status.networks,
+                        last_updated_ms=self._clock(),
+                    )
                 )
-                tick = self._status.to_tick_json()
             await self._emit(tick)
             return
 
@@ -118,8 +132,7 @@ class WifiController:
             if self._status.phase == Phase.CONNECTING:
                 # Already connecting — ignore retry
                 return
-            self._status = self._with_phase(Phase.CONNECTING, iface="wlan0")
-            tick = self._status.to_tick_json()
+            tick = self._commit(self._with_phase(Phase.CONNECTING, iface="wlan0"))
         await self._emit(tick)
 
         try:
@@ -131,15 +144,18 @@ class WifiController:
 
         if result.status == "connected":
             async with self._lock:
-                self._status = Status(
-                    seq=self._status.seq + 1,
-                    phase=Phase.CONNECTED,
-                    iface="wlan0",
-                    current=ConnectionInfo(ssid=result.ssid, rssi=0, ip=result.ip),
-                    networks=self._status.networks,
-                    last_updated_ms=self._clock(),
+                tick = self._commit(
+                    Status(
+                        seq=self._status.seq + 1,
+                        phase=Phase.CONNECTED,
+                        iface="wlan0",
+                        current=ConnectionInfo(
+                            ssid=result.ssid, rssi=0, ip=result.ip
+                        ),
+                        networks=self._status.networks,
+                        last_updated_ms=self._clock(),
+                    )
                 )
-                tick = self._status.to_tick_json()
             await self._emit(tick)
         elif result.status == "associated":
             await self._set_error(
@@ -159,11 +175,12 @@ class WifiController:
         except Exception:
             logger.exception("disconnect raised; continuing")
         async with self._lock:
-            self._status = self._with_phase(
-                Phase.DISCONNECTED,
-                networks=self._status.networks,
+            tick = self._commit(
+                self._with_phase(
+                    Phase.DISCONNECTED,
+                    networks=self._status.networks,
+                )
             )
-            tick = self._status.to_tick_json()
         await self._emit(tick)
 
     async def start_heartbeat(self) -> None:
@@ -209,30 +226,41 @@ class WifiController:
                 logger.exception("heartbeat get_status raised; keeping last known")
 
         async with self._lock:
-            self._status = Status(
-                seq=self._status.seq + 1,
-                phase=self._status.phase,
-                iface=self._status.iface,
-                current=new_current if new_current is not None else self._status.current,
-                networks=self._status.networks,
-                error=self._status.error,
-                last_updated_ms=self._clock(),
+            tick = self._commit(
+                Status(
+                    seq=self._status.seq + 1,
+                    phase=self._status.phase,
+                    iface=self._status.iface,
+                    current=new_current if new_current is not None else self._status.current,
+                    networks=self._status.networks,
+                    error=self._status.error,
+                    last_updated_ms=self._clock(),
+                )
             )
-            tick = self._status.to_tick_json()
         await self._emit(tick)
 
     async def _set_error(self, code: ErrorCode, message: str) -> None:
         async with self._lock:
-            self._status = Status(
-                seq=self._status.seq + 1,
-                phase=Phase.ERROR,
-                iface=self._status.iface,
-                networks=self._status.networks,
-                error=StatusError(code=code.value, message=message),
-                last_updated_ms=self._clock(),
+            tick = self._commit(
+                Status(
+                    seq=self._status.seq + 1,
+                    phase=Phase.ERROR,
+                    iface=self._status.iface,
+                    networks=self._status.networks,
+                    error=StatusError(code=code.value, message=message),
+                    last_updated_ms=self._clock(),
+                )
             )
-            tick = self._status.to_tick_json()
         await self._emit(tick)
+
+    def _commit(self, status: Status) -> bytes:
+        """Atomically swap in a new Status, refresh JSON cache, return tick.
+
+        Caller must hold the lock.
+        """
+        self._status = status
+        self._latest_status_json = status.to_json()
+        return status.to_tick_json()
 
     def _with_phase(
         self,

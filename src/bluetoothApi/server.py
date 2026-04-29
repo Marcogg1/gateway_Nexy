@@ -1,16 +1,25 @@
 """BluetoothServer — GATT lifecycle, 4-char WiFi service, and DIS.
 
 Indicate-and-fetch transport: the Status characteristic supports both READ
-(returns full Status JSON) and NOTIFY (small tick payload). Mobile subscribes
-to NOTIFY, performs a READ on each tick to get the full state.
+(returns the cached full Status JSON) and NOTIFY (small tick payload pushed
+on every state change). Mobile subscribes to NOTIFY and performs a READ on
+each tick to get the full state.
 
-Advertising is configured for ~100ms cadence so phones discover the gateway
-within ~0.1s. Configurable via BLE_ADV_INTERVAL_MS env var.
+The nexyhub_ble SDK calls characteristic callbacks synchronously from inside
+its asyncio event loop. Read callbacks must return bytes immediately; write
+callbacks dispatch async controller work via asyncio.create_task().
 
-Factories for the GATT server / service / characteristic / advertisement
-types are injectable so tests run without the nexyhub_ble SDK.
+Advertising parameters are not configurable through the SDK — bless/BlueZ
+manage advertising with their internal defaults. Customising the
+advertising interval would require bypassing the SDK and calling
+LEAdvertisingManager1 over D-Bus directly; that is left to a follow-up.
+
+Factories for the GATT server / service / characteristic types are
+injectable so unit tests run without the SDK.
 """
 
+import asyncio
+import json
 import os
 from typing import Any, Callable
 
@@ -20,7 +29,7 @@ from lib.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# WiFi service UUIDs (modern protocol — clean break from legacy de0a7b0c family)
+# WiFi service UUIDs (modern protocol — clean break from legacy de0a7b0c)
 WIFI_SERVICE_UUID = "de0a7b0d-358f-4cef-b778-000000000000"
 CHR_STATUS = "de0a7b0d-358f-4cef-b778-000000000001"
 CHR_SCAN_REQUEST = "de0a7b0d-358f-4cef-b778-000000000002"
@@ -37,54 +46,41 @@ DIS_MANUFACTURER_UUID = "2A29"
 
 DEFAULT_NAME = "Aritco Gateway"
 DEFAULT_ADAPTER = "hci0"
-# 152 ms = closest int to Apple Accessory Design Guidelines' recommended
-# 152.5 ms (one of the "approved" advertising intervals on iOS). Discovery
-# latency stays under ~0.5 s while keeping RF chatter polite. The gateway is
-# mains-powered, so dynamic fast/slow adv (Argenox #4) is unnecessary —
-# technicians may install the gateway and connect minutes later.
-DEFAULT_ADV_INTERVAL_MS = 152
 DEFAULT_REFRESH_INTERVAL_MS = 2000
 
 
+# nexyhub_ble is the Esse-ti BLE SDK installed inside the Docker image from
+# vendor/nexyhub-ble-sdk/. It is not available in the CI lint environment, so
+# pylint cannot resolve the import. Suppress at the import site.
 def _default_gatt_server_factory(*, name: str, adapter: str) -> Any:
-    from nexyhub_ble import GATTServer  # type: ignore[import-not-found]
+    from nexyhub_ble import GATTServer  # pylint: disable=import-error,import-outside-toplevel
     return GATTServer(name=name, adapter=adapter)
 
 
 def _default_service_factory(uuid: str, primary: bool = True) -> Any:
-    from nexyhub_ble import Service  # type: ignore[import-not-found]
+    from nexyhub_ble import Service  # pylint: disable=import-error,import-outside-toplevel
     return Service(uuid=uuid, primary=primary)
 
 
 def _default_characteristic_factory(
     uuid: str,
     permissions: list[str],
-    **kwargs: object,
+    value: bytes = b"",
+    on_read: Callable[[], bytes] | None = None,
+    on_write: Callable[[bytes], None] | None = None,
 ) -> Any:
-    from nexyhub_ble import Characteristic  # type: ignore[import-not-found]
-    return Characteristic(uuid=uuid, permissions=permissions, **kwargs)
-
-
-def _default_advertisement_factory(
-    *, name: str, service_uuids: list[str], min_interval_ms: int, max_interval_ms: int
-) -> Any:
-    from nexyhub_ble import Advertisement  # type: ignore[import-not-found]
-    return Advertisement(
-        name=name,
-        service_uuids=service_uuids,
-        min_interval_ms=min_interval_ms,
-        max_interval_ms=max_interval_ms,
+    from nexyhub_ble import Characteristic  # pylint: disable=import-error,import-outside-toplevel
+    return Characteristic(
+        uuid=uuid,
+        permissions=permissions,
+        value=value,
+        on_read=on_read,
+        on_write=on_write,
     )
 
 
 class BluetoothServer:
-    """Owns the GATT server, controller, and advertisement.
-
-    Lifecycle:
-      start() — register services, set up advertisement, start GATT, start
-                heartbeat ticker.
-      stop()  — stop heartbeat, stop GATT.
-    """
+    """Owns the GATT server, controller, and registered services."""
 
     def __init__(
         self,
@@ -98,12 +94,10 @@ class BluetoothServer:
         # instead of hardcoding. Legacy used a SOFTWARE_REV C macro.
         software_rev: str = "2026.04",
         manufacturer: str = "Aritco Lift AB",
-        adv_interval_ms: int = DEFAULT_ADV_INTERVAL_MS,
         refresh_interval_ms: int = DEFAULT_REFRESH_INTERVAL_MS,
         gatt_server_factory: Callable[..., Any] = _default_gatt_server_factory,
         service_factory: Callable[..., Any] = _default_service_factory,
         characteristic_factory: Callable[..., Any] = _default_characteristic_factory,
-        advertisement_factory: Callable[..., Any] = _default_advertisement_factory,
     ) -> None:
         self._wifi_cli = wifi_cli
         self._name = name
@@ -113,12 +107,10 @@ class BluetoothServer:
         self._hw_rev = hardware_rev
         self._sw_rev = software_rev
         self._manufacturer = manufacturer
-        self._adv_interval_ms = adv_interval_ms
         self._refresh_interval_ms = refresh_interval_ms
         self._gatt_factory = gatt_server_factory
         self._service_factory = service_factory
         self._char_factory = characteristic_factory
-        self._adv_factory = advertisement_factory
 
         self._controller = WifiController(
             cli=self._wifi_cli,
@@ -128,56 +120,77 @@ class BluetoothServer:
         self._server: Any = None
         self._status_char: Any = None
 
-    # --- characteristic callbacks -------------------------------------------
+    # --- characteristic callbacks (sync — called from SDK on the loop) ------
 
-    async def on_read_status(self) -> bytes:
-        """READ Status — return full JSON. The BLE stack handles fragmentation."""
-        return await self._controller.get_status_json()
+    def on_read_status(self) -> bytes:
+        """Sync read of the cached full Status JSON."""
+        return self._controller.latest_status_json()
 
-    async def on_write_scan(self, value: bytes) -> None:
-        """ScanRequest write. Body: {} or {"force": true}."""
+    def on_write_scan(self, value: bytes) -> None:
+        """Schedule a scan. Body: {} or {\"force\": true}."""
         force = self._parse_force(value)
-        await self._controller.request_scan(force=force)
+        self._dispatch(self._controller.request_scan(force=force))
 
-    async def on_write_connect(self, value: bytes) -> None:
-        """ConnectRequest write. Body: {"ssid","psk","iface"}."""
-        import json
+    def on_write_connect(self, value: bytes) -> None:
+        """Schedule a connect. Body: {\"ssid\",\"psk\",\"iface\"}."""
         try:
             payload = json.loads(value) if value else {}
         except (json.JSONDecodeError, ValueError):
-            await self._controller.report_invalid_request(
-                "ConnectRequest body is not JSON"
+            self._dispatch(
+                self._controller.report_invalid_request(
+                    "ConnectRequest body is not JSON"
+                )
             )
             return
         if not isinstance(payload, dict):
-            await self._controller.report_invalid_request(
-                "ConnectRequest body must be an object"
+            self._dispatch(
+                self._controller.report_invalid_request(
+                    "ConnectRequest body must be an object"
+                )
             )
             return
         ssid = payload.get("ssid", "")
         psk = payload.get("psk", "")
         iface = payload.get("iface", "")
-        if not isinstance(ssid, str) or not isinstance(psk, str) or not isinstance(iface, str):
-            await self._controller.report_invalid_request(
-                "ssid, psk, and iface must be strings"
+        if (
+            not isinstance(ssid, str)
+            or not isinstance(psk, str)
+            or not isinstance(iface, str)
+        ):
+            self._dispatch(
+                self._controller.report_invalid_request(
+                    "ssid, psk, and iface must be strings"
+                )
             )
             return
         if not ssid and iface == "wlan0":
-            await self._controller.report_invalid_request(
-                "ssid is required for wlan0"
+            self._dispatch(
+                self._controller.report_invalid_request(
+                    "ssid is required for wlan0"
+                )
             )
             return
-        await self._controller.request_connect(ssid=ssid, psk=psk, iface=iface)
+        self._dispatch(
+            self._controller.request_connect(ssid=ssid, psk=psk, iface=iface)
+        )
 
-    async def on_write_disconnect(self, value: bytes) -> None:
-        """Disconnect write. Body ignored."""
-        await self._controller.request_disconnect()
+    def on_write_disconnect(self, value: bytes) -> None:
+        """Schedule a disconnect. Body ignored."""
+        self._dispatch(self._controller.request_disconnect())
 
     # --- internals ----------------------------------------------------------
 
     @staticmethod
+    def _dispatch(coro: Any) -> None:
+        """Schedule a controller coroutine on the running loop."""
+        try:
+            asyncio.get_running_loop().create_task(coro)
+        except RuntimeError:
+            logger.warning("no running loop; dropping BLE callback")
+            coro.close()
+
+    @staticmethod
     def _parse_force(value: bytes) -> bool:
-        import json
         if not value:
             return False
         try:
@@ -249,21 +262,10 @@ class BluetoothServer:
             )
         self._server.add_service(dis_service)
 
-        # Fast advertising: min == max for stable cadence, ~100ms by default
-        advertisement = self._adv_factory(
-            name=self._name,
-            service_uuids=[WIFI_SERVICE_UUID],
-            min_interval_ms=self._adv_interval_ms,
-            max_interval_ms=self._adv_interval_ms,
-        )
-        if hasattr(self._server, "set_advertisement"):
-            self._server.set_advertisement(advertisement)
-
         logger.info(
-            "Starting %s BLE service on %s (adv %dms, heartbeat %dms)",
+            "Starting %s BLE service on %s (heartbeat %dms)",
             self._name,
             self._adapter,
-            self._adv_interval_ms,
             self._refresh_interval_ms,
         )
         await self._server.start()
@@ -280,10 +282,9 @@ def build_from_env(wifi_cli: WifiCli) -> BluetoothServer:
     """Build a BluetoothServer reading config from env vars.
 
     Reads:
-      BLE_NAME              (default "Aritco Gateway")
-      BLE_ADAPTER           (default "hci0")
-      AR_NUMBER             (default "")
-      BLE_ADV_INTERVAL_MS   (default 100)
+      BLE_NAME              (default \"Aritco Gateway\")
+      BLE_ADAPTER           (default \"hci0\")
+      AR_NUMBER             (default \"\")
       BLE_STATUS_REFRESH_MS (default 2000)
     """
     return BluetoothServer(
@@ -291,9 +292,6 @@ def build_from_env(wifi_cli: WifiCli) -> BluetoothServer:
         name=os.environ.get("BLE_NAME", DEFAULT_NAME),
         adapter=os.environ.get("BLE_ADAPTER", DEFAULT_ADAPTER),
         ar_number=os.environ.get("AR_NUMBER", ""),
-        adv_interval_ms=int(
-            os.environ.get("BLE_ADV_INTERVAL_MS", DEFAULT_ADV_INTERVAL_MS)
-        ),
         refresh_interval_ms=int(
             os.environ.get("BLE_STATUS_REFRESH_MS", DEFAULT_REFRESH_INTERVAL_MS)
         ),

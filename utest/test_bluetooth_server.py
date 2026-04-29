@@ -1,4 +1,4 @@
-"""Tests for BluetoothServer — service registration, callbacks, advertising."""
+"""Tests for BluetoothServer — service registration, callbacks, lifecycle."""
 
 import asyncio
 import json
@@ -31,12 +31,19 @@ from bluetoothApi.wifi_cli import ConnectResult
 
 
 class _FakeChar:
-    def __init__(self, uuid: str, permissions: list[str], **kwargs: object) -> None:
+    def __init__(
+        self,
+        uuid: str,
+        permissions: list[str],
+        value: bytes = b"",
+        on_read=None,
+        on_write=None,
+    ) -> None:
         self.uuid = uuid
         self.permissions = permissions
-        self.value: bytes = kwargs.get("value", b"")  # type: ignore[assignment]
-        self.on_read = kwargs.get("on_read")
-        self.on_write = kwargs.get("on_write")
+        self.value: bytes = value
+        self.on_read = on_read
+        self.on_write = on_write
 
 
 class _FakeService:
@@ -48,28 +55,16 @@ class _FakeService:
         self.characteristics.append(c)
 
 
-class _FakeAdvertisement:
-    def __init__(self, *, name, service_uuids, min_interval_ms, max_interval_ms):
-        self.name = name
-        self.service_uuids = service_uuids
-        self.min_interval_ms = min_interval_ms
-        self.max_interval_ms = max_interval_ms
-
-
 class _FakeGATT:
     def __init__(self, name: str, adapter: str) -> None:
         self.name = name
         self.adapter = adapter
         self.services: list[_FakeService] = []
-        self.advertisement: _FakeAdvertisement | None = None
         self.started = False
         self.stopped = False
 
     def add_service(self, s: _FakeService) -> None:
         self.services.append(s)
-
-    def set_advertisement(self, adv: _FakeAdvertisement) -> None:
-        self.advertisement = adv
 
     async def start(self) -> None:
         self.started = True
@@ -104,21 +99,23 @@ class _FakeCli:
         return self.status_return
 
 
-def _make_server(cli: _FakeCli, **overrides) -> BluetoothServer:
-    defaults = dict(
+def _make_server(cli: _FakeCli, ar_number: str = "AR12345") -> BluetoothServer:
+    return BluetoothServer(
         wifi_cli=cli,  # type: ignore[arg-type]
         name="Aritco Gateway",
         adapter="hci0",
-        ar_number="AR12345",
-        adv_interval_ms=100,
+        ar_number=ar_number,
         refresh_interval_ms=60_000,  # disable heartbeat noise in tests
         gatt_server_factory=_gatt_factory,
         service_factory=_FakeService,
         characteristic_factory=_FakeChar,
-        advertisement_factory=_FakeAdvertisement,
     )
-    defaults.update(overrides)
-    return BluetoothServer(**defaults)
+
+
+async def _drain_loop() -> None:
+    """Run pending tasks scheduled via create_task before assertions."""
+    for _ in range(5):
+        await asyncio.sleep(0)
 
 
 # --- Tests -------------------------------------------------------------------
@@ -195,28 +192,13 @@ class TestServiceRegistration(unittest.IsolatedAsyncioTestCase):
             await server.stop()
 
 
-class TestAdvertisement(unittest.IsolatedAsyncioTestCase):
-    async def test_advertises_with_configured_interval(self):
-        server = _make_server(_FakeCli(), adv_interval_ms=100)
-        await server.start()
-        try:
-            adv = server._server.advertisement  # type: ignore[attr-defined]
-            self.assertIsNotNone(adv)
-            self.assertEqual(adv.min_interval_ms, 100)
-            self.assertEqual(adv.max_interval_ms, 100)
-            self.assertEqual(adv.service_uuids, [WIFI_SERVICE_UUID])
-            self.assertEqual(adv.name, "Aritco Gateway")
-        finally:
-            await server.stop()
-
-
 class TestStatusReadCallback(unittest.IsolatedAsyncioTestCase):
-    async def test_returns_full_status_json(self):
+    async def test_returns_full_status_json_sync(self):
         cli = _FakeCli()
         server = _make_server(cli)
         await server.start()
         try:
-            payload = await server.on_read_status()
+            payload = server.on_read_status()
             decoded = json.loads(payload)
             self.assertEqual(decoded["phase"], "idle")
             self.assertEqual(decoded["networks"], [])
@@ -233,19 +215,20 @@ class TestScanWriteCallback(unittest.IsolatedAsyncioTestCase):
         server = _make_server(cli)
         await server.start()
         try:
-            await server.on_write_scan(b"")
-            full = json.loads(await server.on_read_status())
+            server.on_write_scan(b"")
+            await _drain_loop()
+            full = json.loads(server.on_read_status())
             self.assertEqual(len(full["networks"]), 1)
         finally:
             await server.stop()
 
     async def test_force_payload(self):
-        cli = _FakeCli()
-        server = _make_server(cli)
+        server = _make_server(_FakeCli())
         await server.start()
         try:
-            await server.on_write_scan(b'{"force":true}')
-            full = json.loads(await server.on_read_status())
+            server.on_write_scan(b'{"force":true}')
+            await _drain_loop()
+            full = json.loads(server.on_read_status())
             self.assertEqual(full["phase"], "idle")
         finally:
             await server.stop()
@@ -258,10 +241,11 @@ class TestConnectWriteCallback(unittest.IsolatedAsyncioTestCase):
         server = _make_server(cli)
         await server.start()
         try:
-            await server.on_write_connect(
+            server.on_write_connect(
                 b'{"ssid":"Home","psk":"longpsk1234","iface":"wlan0"}'
             )
-            full = json.loads(await server.on_read_status())
+            await _drain_loop()
+            full = json.loads(server.on_read_status())
             self.assertEqual(full["phase"], "connected")
             self.assertEqual(full["iface"], "wlan0")
             self.assertEqual(cli.connect_calls, [("Home", "longpsk1234")])
@@ -272,8 +256,9 @@ class TestConnectWriteCallback(unittest.IsolatedAsyncioTestCase):
         server = _make_server(_FakeCli())
         await server.start()
         try:
-            await server.on_write_connect(b"not json")
-            full = json.loads(await server.on_read_status())
+            server.on_write_connect(b"not json")
+            await _drain_loop()
+            full = json.loads(server.on_read_status())
             self.assertEqual(full["phase"], "error")
             self.assertEqual(full["error"]["code"], "INVALID_REQUEST")
         finally:
@@ -283,8 +268,9 @@ class TestConnectWriteCallback(unittest.IsolatedAsyncioTestCase):
         server = _make_server(_FakeCli())
         await server.start()
         try:
-            await server.on_write_connect(b'["array","not","object"]')
-            full = json.loads(await server.on_read_status())
+            server.on_write_connect(b'["array","not","object"]')
+            await _drain_loop()
+            full = json.loads(server.on_read_status())
             self.assertEqual(full["error"]["code"], "INVALID_REQUEST")
         finally:
             await server.stop()
@@ -293,10 +279,11 @@ class TestConnectWriteCallback(unittest.IsolatedAsyncioTestCase):
         server = _make_server(_FakeCli())
         await server.start()
         try:
-            await server.on_write_connect(
+            server.on_write_connect(
                 b'{"ssid":"","psk":"longpsk1234","iface":"wlan0"}'
             )
-            full = json.loads(await server.on_read_status())
+            await _drain_loop()
+            full = json.loads(server.on_read_status())
             self.assertEqual(full["error"]["code"], "INVALID_REQUEST")
         finally:
             await server.stop()
@@ -308,9 +295,10 @@ class TestDisconnectWriteCallback(unittest.IsolatedAsyncioTestCase):
         server = _make_server(cli)
         await server.start()
         try:
-            await server.on_write_disconnect(b"")
+            server.on_write_disconnect(b"")
+            await _drain_loop()
             self.assertEqual(cli.disconnect_calls, 1)
-            full = json.loads(await server.on_read_status())
+            full = json.loads(server.on_read_status())
             self.assertEqual(full["phase"], "disconnected")
         finally:
             await server.stop()
@@ -323,7 +311,8 @@ class TestStatusNotifyTick(unittest.IsolatedAsyncioTestCase):
         await server.start()
         try:
             initial_value = server._status_char.value  # type: ignore[attr-defined]
-            await server.on_write_disconnect(b"")
+            server.on_write_disconnect(b"")
+            await _drain_loop()
             new_value = server._status_char.value  # type: ignore[attr-defined]
             self.assertNotEqual(initial_value, new_value)
             tick = json.loads(new_value)
