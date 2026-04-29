@@ -11,10 +11,9 @@ RUN apt-get update && apt-get install -y \
 COPY . /src
 
 RUN pip install --upgrade pip
-# When the nexyhub_ble SDK ships, drop it into vendor/nexyhub-ble-sdk and
-# uncomment the next two lines so the gateway image picks it up.
-# COPY vendor/nexyhub-ble-sdk /tmp/nexyhub-ble-sdk
-# RUN pip install /tmp/nexyhub-ble-sdk
+# Vendored Esse-ti BLE SDK — see vendor/nexyhub-ble-sdk/NOTICE.md
+COPY vendor/nexyhub-ble-sdk /tmp/nexyhub-ble-sdk
+RUN pip install /tmp/nexyhub-ble-sdk
 RUN pip install -r requirements.txt
 
 EXPOSE 8080
