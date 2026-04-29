@@ -1,5 +1,7 @@
 import asyncio
-from cloudApi.dps_client import DPSClient 
+from bluetoothApi.server import build_from_env as build_bluetooth_server
+from bluetoothApi.wifi_cli import WifiCli
+from cloudApi.dps_client import DPSClient
 from cloudApi.device_client import DeviceClientFactory
 from cloudApi.method_request_handler import MethodRequestHandler
 from cloudApi.device_twin_reported import DeviceTwinReporter
@@ -64,6 +66,14 @@ async def main():
         heartbeat_handler = HeartbeatHandler(send_event, reporter, desired_handler)
     except Exception as e:
         logger.error(f"Handler initialization failed: {e}", exc_info=True)
+        return
+
+    # Start BLE server for WiFi onboarding (modern protocol)
+    try:
+        bluetooth_server = build_bluetooth_server(wifi_cli=WifiCli())
+        await bluetooth_server.start()
+    except Exception as e:
+        logger.error(f"Bluetooth server failed to start: {e}", exc_info=True)
         return
 
     #Run in parallel

@@ -3,3 +3,4 @@ pyserial
 azure-iot-device
 azure-storage-blob
 pyyaml
+bless>=0.3.0
