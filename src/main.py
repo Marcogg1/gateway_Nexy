@@ -68,13 +68,14 @@ async def main():
         logger.error(f"Handler initialization failed: {e}", exc_info=True)
         return
 
-    # Start BLE server for WiFi onboarding (modern protocol)
+    # Start BLE server for WiFi onboarding (modern protocol).
+    # BLE failure is non-fatal — lift data path must keep running even
+    # if the BLE adapter is missing or the SDK fails to load.
     try:
         bluetooth_server = build_bluetooth_server(wifi_cli=WifiCli())
         await bluetooth_server.start()
     except Exception as e:
         logger.error(f"Bluetooth server failed to start: {e}", exc_info=True)
-        return
 
     #Run in parallel
     await asyncio.gather(
