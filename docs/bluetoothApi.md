@@ -106,33 +106,24 @@ multiple characteristics or interpret status codes from raw bytes.
 | `BLE_NAME` | `Aritco Gateway` | Advertised device name |
 | `BLE_ADAPTER` | `hci0` | Host BLE adapter |
 | `AR_NUMBER` | `""` | DIS Serial value |
-| `BLE_ADV_INTERVAL_MS` | `152` | Advertising interval (see below) |
 | `BLE_STATUS_REFRESH_MS` | `2000` | Heartbeat ticker period |
 
-### Why `BLE_ADV_INTERVAL_MS = 152`?
+### Advertising interval
 
-Apple's *Accessory Design Guidelines* publishes a list of approved BLE
-advertising intervals that align with the iOS scanner's timing. Sticking to
-one of them gives reliable discovery on iPhones; arbitrary values can be
-delayed or missed. The approved intervals are:
+The advertising interval is controlled by `bless` / BlueZ defaults inside
+the `nexyhub_ble` SDK and is not configurable from our app. BlueZ
+typically advertises every ~100 ms - 1 s when no central is connected,
+which gives sub-second discovery on iOS and Android.
 
-```
-20 ms  152.5 ms  211.25 ms  318.75 ms  417.5 ms
-546.25 ms  760 ms  852.5 ms  1022.5 ms  1285 ms
-```
-
-`152` ms is the closest integer to Apple's recommended `152.5` ms (BlueZ
-takes integer ms). It gives ~0.3 s discovery latency — perceptually
-instant — while keeping the radio idle for most of the time. We
-deliberately do not run at the 20 ms "fast" value: BLE is used rarely
-(install + occasional reconfig), so the always-on cost of 50 adv/sec on a
-mains-powered gateway is wasted RF and a tiny ~30 Wh/yr power penalty for
-no perceptual gain.
+If a tighter cadence is required (e.g. Apple's approved 152.5 ms slot),
+the SDK would need to grow an interval setter or we would bypass it and
+talk to `LEAdvertisingManager1` over D-Bus directly. Deferred until
+HW testing shows discovery is too slow.
 
 ## Manual hardware test
 
 1. Flash gateway, start container. Logs show `Starting Aritco Gateway BLE service`.
-2. Mobile app finds `Aritco Gateway` within ~0.3s (vs ~30s on legacy).
+2. Mobile app finds `Aritco Gateway` within ~1 s (BlueZ default cadence).
 3. Subscribe to Status — receive immediate tick with `phase=idle`.
 4. Write `{}` to ScanRequest. Receive ticks → READ shows `phase=scanning`,
    then `phase=idle` with networks list.
