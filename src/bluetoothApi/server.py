@@ -90,9 +90,7 @@ class BluetoothServer:
         ar_number: str = "",
         model: str = "46044-V1",
         hardware_rev: str = "1.3",
-        # TODO: source software_rev from a version file or build-time env var
-        # instead of hardcoding. Legacy used a SOFTWARE_REV C macro.
-        software_rev: str = "2026.04",
+        software_rev: str = "0.0.0-dev",
         manufacturer: str = "Aritco Lift AB",
         refresh_interval_ms: int = DEFAULT_REFRESH_INTERVAL_MS,
         gatt_server_factory: Callable[..., Any] = _default_gatt_server_factory,
@@ -286,13 +284,24 @@ def build_from_env(wifi_cli: WifiCli) -> BluetoothServer:
       BLE_ADAPTER           (default \"hci0\")
       AR_NUMBER             (default \"\")
       BLE_STATUS_REFRESH_MS (default 2000)
+      BUILD_VERSION         (default \"2026.04\") — surfaced as DIS Software Revision
     """
+    refresh_raw = os.environ.get("BLE_STATUS_REFRESH_MS")
+    try:
+        refresh_ms = int(refresh_raw) if refresh_raw else DEFAULT_REFRESH_INTERVAL_MS
+    except ValueError:
+        logger.warning(
+            "Invalid BLE_STATUS_REFRESH_MS=%r, falling back to %d",
+            refresh_raw,
+            DEFAULT_REFRESH_INTERVAL_MS,
+        )
+        refresh_ms = DEFAULT_REFRESH_INTERVAL_MS
+
     return BluetoothServer(
         wifi_cli=wifi_cli,
         name=os.environ.get("BLE_NAME", DEFAULT_NAME),
         adapter=os.environ.get("BLE_ADAPTER", DEFAULT_ADAPTER),
         ar_number=os.environ.get("AR_NUMBER", ""),
-        refresh_interval_ms=int(
-            os.environ.get("BLE_STATUS_REFRESH_MS", DEFAULT_REFRESH_INTERVAL_MS)
-        ),
+        software_rev=os.environ.get("BUILD_VERSION", "0.0.0-dev"),
+        refresh_interval_ms=refresh_ms,
     )

@@ -71,6 +71,7 @@ async def main():
     # Start BLE server for WiFi onboarding (modern protocol).
     # BLE failure is non-fatal — lift data path must keep running even
     # if the BLE adapter is missing or the SDK fails to load.
+    bluetooth_server = None
     try:
         bluetooth_server = build_bluetooth_server(wifi_cli=WifiCli())
         await bluetooth_server.start()
@@ -78,15 +79,22 @@ async def main():
         logger.error(f"Bluetooth server failed to start: {e}", exc_info=True)
 
     #Run in parallel
-    await asyncio.gather(
-        method_handler.listen_for_method(),
-        desired_handler.listen_for_desired_updates(),
-        heartbeat_handler.run(),
-        proxy.run(send_event, desired_handler),
-        liftSim.report_temperature_loop(), # Start temperature reporting loop testing. Remove when not needed
-        liftSim.simulate_lift_operation(), # Simulate lift reporting, add properties. Remove when not needed
-        liftSim.send_parameter_data() # Simulate telemetry data sending. Remove when not needed
-    )
+    try:
+        await asyncio.gather(
+            method_handler.listen_for_method(),
+            desired_handler.listen_for_desired_updates(),
+            heartbeat_handler.run(),
+            proxy.run(send_event, desired_handler),
+            liftSim.report_temperature_loop(), # Start temperature reporting loop testing. Remove when not needed
+            liftSim.simulate_lift_operation(), # Simulate lift reporting, add properties. Remove when not needed
+            liftSim.send_parameter_data() # Simulate telemetry data sending. Remove when not needed
+        )
+    finally:
+        if bluetooth_server is not None:
+            try:
+                await bluetooth_server.stop()
+            except Exception:
+                logger.exception("Bluetooth server stop failed")
 
 
 if __name__ == "__main__":

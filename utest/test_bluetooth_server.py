@@ -113,9 +113,13 @@ def _make_server(cli: _FakeCli, ar_number: str = "AR12345") -> BluetoothServer:
 
 
 async def _drain_loop() -> None:
-    """Run pending tasks scheduled via create_task before assertions."""
-    for _ in range(5):
-        await asyncio.sleep(0)
+    """Yield long enough for tasks scheduled via create_task to finish.
+
+    Avoids the fragile fixed-iteration-count pattern: a small real sleep
+    yields the loop until pending callbacks run, regardless of how many
+    iterations the chain needs.
+    """
+    await asyncio.sleep(0.01)
 
 
 # --- Tests -------------------------------------------------------------------
@@ -186,7 +190,7 @@ class TestServiceRegistration(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(by_uuid[DIS_SERIAL_UUID], b"AR99999")
             self.assertEqual(by_uuid[DIS_MODEL_UUID], b"46044-V1")
             self.assertEqual(by_uuid[DIS_HARDWARE_REV_UUID], b"1.3")
-            self.assertEqual(by_uuid[DIS_SOFTWARE_REV_UUID], b"2026.04")
+            self.assertEqual(by_uuid[DIS_SOFTWARE_REV_UUID], b"0.0.0-dev")
             self.assertEqual(by_uuid[DIS_MANUFACTURER_UUID], b"Aritco Lift AB")
         finally:
             await server.stop()
