@@ -8,13 +8,12 @@ Handles serial communication with lift control hardware including:
 - Special handling for reset alarms, speed config, floor locks
 - Time synchronization integration
 
-Communication uses Modbus RTU protocol over RS485 or USB-RS485 adapter.
+Communication uses Modbus RTU protocol over the onboard RS485 bus.
 """
 # pylint: disable=too-many-lines
 from __future__ import annotations
 
 import ctypes
-import glob
 import os
 import subprocess
 from dataclasses import dataclass, field
@@ -29,6 +28,7 @@ from pymodbus.pdu.file_message import WriteFileRecordResponse
 from filemgmt.disk_handler import DiskHandler
 from lib.error_signals import MbCode
 from lib.logging_config import get_logger, setup_logging
+from lib.rs485_serial import RS485Serial
 from liftApi.modbus_file_record import ReadFileRecord, WriteFileRecord
 
 setup_logging()
@@ -136,9 +136,10 @@ class ModBusHandler:
         """Initialize Modbus handler and establish connection."""
         self._modbus_link = False
         self.name = MbCode.SOURCE.value
-        self.rs_port = "/dev/ttymxc2"
+        self.rs_port = "/dev/ttyLP1"
+        self.gpio_chip = "/dev/gpiochip1"
+        self.de_line = 2
         self.lcm_address = 0x0A
-        self.usb_connected = False
         self.client: ModbusSerialClient | None = None
 
         # Initialize disk handler
@@ -170,31 +171,12 @@ class ModBusHandler:
         return config
 
     def _setup_connection(self) -> None:
-        """Setup Modbus serial connection.
+        """Open Modbus serial connection on the onboard RS485 bus."""
+        self._modbus_link = os.path.exists(self.rs_port)
+        logger.info("Using port %s", self.rs_port)
 
-        Attempts to connect using USB Modbus cable first, falls back to
-        RS232 port if USB cable not found.
-        """
-        # Find path to Modbus cable device with wildcard
-        mb_usb_port = "/dev/serial/by-id/usb-FTDI_USB-RS485_Cable_*"
-        try:
-            serial_port = glob.glob(mb_usb_port)[0]
-            self._modbus_link = True
-            self.usb_connected = True
-        except IndexError:
-            logger.warning(
-                "Could not find Modbus cable '%s', using RS232",
-                mb_usb_port,
-            )
-            if not self.usb_connected:
-                serial_port = self.rs_port
-
-        logger.info("Using port %s", serial_port)
-
-        # Setup connection
-        # In pymodbus 3.x, use framer instead of method parameter
         self.client = ModbusSerialClient(
-            port=serial_port,
+            port=self.rs_port,
             baudrate=115200,
             timeout=3,
             parity="N",
@@ -202,20 +184,34 @@ class ModBusHandler:
             bytesize=8,
         )
 
+        self.client.connect()
+        try:
+            if self.client.socket is not None:
+                self.client.socket.close()
+        except Exception:  # pylint: disable=broad-exception-caught
+            pass
+        self.client.socket = RS485Serial(
+            port=self.rs_port,
+            baudrate=115200,
+            timeout=3,
+            parity="N",
+            stopbits=1,
+            bytesize=8,
+            gpio_chip=self.gpio_chip,
+            de_line=self.de_line,
+        )
+
     def _test_connection(self) -> bool:
-        """Test if Modbus cable device is available.
+        """Test if onboard RS485 device exists.
 
         Returns:
-            True if USB cable found, False otherwise
+            True if the tty path is present, False otherwise.
         """
-        mb_usb_port = "/dev/serial/by-id/usb-FTDI_USB-RS485_Cable_*"
-        try:
-            _ = glob.glob(mb_usb_port)[0]
+        if os.path.exists(self.rs_port):
             return True
-        except IndexError:
-            logger.error("Could not find Modbus cable '%s'", mb_usb_port)
-            self._modbus_link = False
-            return False
+        logger.error("No Modbus device found at '%s'", self.rs_port)
+        self._modbus_link = False
+        return False
 
     @check_modbus_connection
     def read_parameter(self, par: list[str]) -> tuple[Any, str, str]:

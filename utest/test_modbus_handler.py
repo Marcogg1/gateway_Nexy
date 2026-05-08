@@ -56,22 +56,21 @@ class TestModBusHandler(unittest.TestCase):
     def setUp(self) -> None:
         """Setup test fixtures before each test."""
         print(f"\nSetup: {self._testMethodName}")
-        # Mock serial connection to avoid hardware dependency
-        with patch("pymodbus.client.ModbusSerialClient"):
-            with patch("glob.glob", return_value=[]):  # No USB device
-                with patch("filemgmt.disk_handler.DiskHandler"):
-                    self.handler = ModBusHandler()
-                    # Ensure disk_handler is not None
-                    self.handler.disk_handler = MagicMock()
-                    self.handler.disk_handler.get_trace_log_path = MagicMock(
-                        return_value="/tmp/logs"
-                    )
-                    self.handler.disk_handler.get_upgrade_package_path = MagicMock(
-                        return_value="/tmp/up"
-                    )
-                    self.handler.disk_handler.check_enough_free_space = MagicMock(
-                        return_value=True
-                    )
+        # Mock serial + RS485 + disk to avoid hardware dependency
+        with patch("pymodbus.client.ModbusSerialClient"), \
+             patch("liftApi.modbus_handler.RS485Serial"), \
+             patch("filemgmt.disk_handler.DiskHandler"):
+            self.handler = ModBusHandler()
+            self.handler.disk_handler = MagicMock()
+            self.handler.disk_handler.get_trace_log_path = MagicMock(
+                return_value="/tmp/logs"
+            )
+            self.handler.disk_handler.get_upgrade_package_path = MagicMock(
+                return_value="/tmp/up"
+            )
+            self.handler.disk_handler.check_enough_free_space = MagicMock(
+                return_value=True
+            )
         assert self.handler.name == "ModBusHandler"
 
     def tearDown(self) -> None:
@@ -80,13 +79,12 @@ class TestModBusHandler(unittest.TestCase):
 
     # ---- Connection Tests ----
 
-    def test_setup_connection_no_usb(self) -> None:
-        """Test connection setup when USB not found."""
-        assert self.handler.usb_connected is False
+    def test_setup_connection_marks_link_down_when_port_missing(self) -> None:
+        """_modbus_link is False when the RS485 tty path does not exist."""
         assert self.handler._modbus_link is False
 
-    def test_test_connection_returns_false_when_no_usb(self) -> None:
-        """Test connection check returns False when no USB."""
+    def test_test_connection_returns_false_when_port_missing(self) -> None:
+        """_test_connection returns False when the RS485 tty path is absent."""
         result = self.handler._test_connection()
         assert result is False
         assert self.handler._modbus_link is False
