@@ -1,0 +1,43 @@
+# syntax=docker/dockerfile:1.7
+
+FROM python:3.14.2-slim-bookworm
+
+WORKDIR /src
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean && \
+    apt-get update && apt-get install -y --no-install-recommends \
+        dbus libdbus-1-dev libglib2.0-dev \
+        bluez \
+        iproute2 iputils-ping curl \
+        openssh-server \
+        libgpiod2 \
+    && mkdir -p /run/sshd
+
+COPY scripts/sshd_config /etc/ssh/sshd_config
+
+ENV SSH_ENABLED=true
+ENV SSH_PORT=22
+
+COPY scripts/entrypoint.sh /entrypoint.sh
+COPY scripts/docker-entrypoint.d/ /docker-entrypoint.d/
+RUN chmod +x /entrypoint.sh /docker-entrypoint.d/*.sh
+
+COPY vendor/nexyhub-ble-sdk /tmp/nexyhub-ble-sdk
+COPY requirements.txt /tmp/requirements.txt
+
+RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
+    pip install --prefer-binary \
+        /tmp/nexyhub-ble-sdk \
+        -r /tmp/requirements.txt \
+        debugpy
+
+COPY . /src
+
+RUN mkdir -p /src/logs
+
+EXPOSE 22 8080 5678
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["python", "src/main.py"]

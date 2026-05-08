@@ -142,3 +142,6 @@ cython_debug/
 # Local working artifacts (specs, plans, agent config)
 docs/superpowers/
 .claude/
+
+# Built docker image archives
+*.tar

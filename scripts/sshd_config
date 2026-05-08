@@ -1,0 +1,34 @@
+# sshd_config — SSH config for Docker container (Debian).
+#
+# Port may be overridden at runtime via $SSH_PORT.
+
+Port 22
+
+# Host keys (generated at runtime by the init script)
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+HostKey /etc/ssh/ssh_host_ed25519_key
+
+# Authentication
+PermitRootLogin yes
+PasswordAuthentication yes
+PermitEmptyPasswords no
+
+# Disable X11 forwarding (not needed in a container)
+X11Forwarding no
+
+# Enable TCP forwarding (useful for tunnels and port forwarding)
+AllowTcpForwarding yes
+
+# Timeout and keepalive
+ClientAliveInterval 30
+ClientAliveCountMax 3
+
+# Log
+LogLevel INFO
+
+# SFTP subsystem (Debian path)
+Subsystem sftp /usr/lib/openssh/sftp-server
+
+# PID file
+PidFile /var/run/sshd.pid
