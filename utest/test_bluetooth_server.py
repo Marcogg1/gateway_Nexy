@@ -190,7 +190,7 @@ class TestServiceRegistration(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(by_uuid[DIS_SERIAL_UUID], b"AR99999")
             self.assertEqual(by_uuid[DIS_MODEL_UUID], b"46044-V1")
             self.assertEqual(by_uuid[DIS_HARDWARE_REV_UUID], b"1.3")
-            self.assertEqual(by_uuid[DIS_SOFTWARE_REV_UUID], b"0.0.0-dev")
+            self.assertEqual(by_uuid[DIS_SOFTWARE_REV_UUID], b"2026.04")
             self.assertEqual(by_uuid[DIS_MANUFACTURER_UUID], b"Aritco Lift AB")
         finally:
             await server.stop()
