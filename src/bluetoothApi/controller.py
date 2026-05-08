@@ -132,7 +132,13 @@ class WifiController:
             if self._status.phase == Phase.CONNECTING:
                 # Already connecting — ignore retry
                 return
-            tick = self._commit(self._with_phase(Phase.CONNECTING, iface="wlan0"))
+            tick = self._commit(
+                self._with_phase(
+                    Phase.CONNECTING,
+                    iface="wlan0",
+                    networks=self._status.networks,
+                )
+            )
         await self._emit(tick)
 
         try:

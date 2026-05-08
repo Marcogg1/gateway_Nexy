@@ -91,14 +91,18 @@ class WifiCli:
         self._script = script_path
 
     async def scan(self) -> list[NetworkInfo]:
-        """Run a WiFi scan, return deduplicated networks sorted by signal."""
+        """Run a WiFi scan, return deduplicated networks sorted by signal.
+
+        Raises asyncio.TimeoutError so the controller can map it to a TIMEOUT
+        error code rather than silently returning an empty network list.
+        """
         try:
             rc, stdout, stderr = await self._runner(
                 (self._script, "scan"), SCAN_TIMEOUT_S
             )
         except asyncio.TimeoutError:
             logger.warning("wifi scan timed out")
-            return []
+            raise
         if rc != 0:
             logger.warning("wifi scan rc=%s stderr=%s", rc, stderr[:200])
             return []
@@ -124,14 +128,18 @@ class WifiCli:
         return sorted(seen.values(), key=lambda n: n.rssi, reverse=True)
 
     async def connect(self, ssid: str, psk: str) -> ConnectResult:
-        """Attempt a connection. Returns the raw script status."""
+        """Attempt a connection. Returns the raw script status.
+
+        Raises asyncio.TimeoutError so the controller surfaces TIMEOUT instead
+        of misclassifying the failure as SSID_NOT_FOUND.
+        """
         try:
             _rc, stdout, _stderr = await self._runner(
                 (self._script, "connect", ssid, psk), CONNECT_TIMEOUT_S
             )
         except asyncio.TimeoutError:
             logger.warning("wifi connect timed out")
-            return ConnectResult(status="error", ssid="", ip="")
+            raise
         try:
             data = json.loads(stdout) if stdout else {}
         except json.JSONDecodeError:
