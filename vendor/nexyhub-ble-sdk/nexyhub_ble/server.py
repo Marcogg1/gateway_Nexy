@@ -101,7 +101,14 @@ class GATTServer:
         """Update a characteristic value in bless (triggers notification)."""
         if self._bless:
             self._bless.get_characteristic(uuid).value = bytearray(value)
-            self._bless.update_value(self._services[0].uuid, uuid)
+            service_uuid = next(
+                (
+                    s.uuid for s in self._services
+                    if any(c.uuid == uuid for c in s.characteristics)
+                ),
+                self._services[0].uuid,
+            )
+            self._bless.update_value(service_uuid, uuid)
 
     async def start(self) -> None:
         if self._running:

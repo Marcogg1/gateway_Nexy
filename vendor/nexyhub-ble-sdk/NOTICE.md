@@ -34,3 +34,11 @@ docs) is not used here.
 Do not modify these files. If a fix is required, raise it with Esse-ti
 and update via a new SDK release. Local patches diverge silently from
 upstream and become a maintenance burden.
+
+### Local patches in flight (to upstream to Esse-ti)
+
+- `nexyhub_ble/server.py:_update_value` — look up the owning service for
+  the notified characteristic instead of always using `self._services[0]`.
+  Hardcoded `services[0]` is a latent bug if a notify characteristic is
+  ever added to a service other than the first. Re-apply this fix after
+  any SDK refresh until upstream merges it.
