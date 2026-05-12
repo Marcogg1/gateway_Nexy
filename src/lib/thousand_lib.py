@@ -107,21 +107,25 @@ class ThousandLib:
             self.logger.error(f"Param {param} not in 1k database")
             return [], self.rs232Codes.PARAM_NOT_IN_DB.name
 
-    async def poll_params(self, handler: Any) -> list[int]:
+    async def poll_params(self, handler: Any, force_read_all: bool = False) -> list[int]:
         """Poll 1K lift for changed parameters.
 
-        Calls handler.poll_lift which reads all RS232 packages and
-        updates the shared database directly (handler and proxy share
-        the same ThousandLib instance).
+        Calls handler.poll_lift which reads RS232 packages and updates
+        the shared database directly (handler and proxy share the same
+        ThousandLib instance).
 
         Args:
             handler: Rs232Handler instance for hardware communication.
+            force_read_all: When True, poll every file package in one go
+                (poll_type='1') so the db is fully populated — used by
+                LiftProxy on the first poll cycle.
 
         Returns:
             List of parameter IDs whose values changed.
         """
+        poll_type = "1" if force_read_all else "0"
         response, _, code = await asyncio.to_thread(
-            handler.poll_lift, ["0"]
+            handler.poll_lift, [poll_type]
         )
         if code != Rs232Code.NO_ERR.name and code != Rs232Code.PARTIAL_ERR.name:
             if code != Rs232Code.NO_UPDATED_PARAMS.name:
