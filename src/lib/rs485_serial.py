@@ -45,7 +45,7 @@ class RS485Serial(serial.Serial):
             },
             consumer="modbus-rs485-de",
         )
-        self._drain_safety_s = (10 + 2) / float(self.baudrate)
+        self._drain_safety_s = 2e-3
 
     def write(self, data: Buffer) -> int | None:
         """Drive DE active, write, drain, drop DE."""
