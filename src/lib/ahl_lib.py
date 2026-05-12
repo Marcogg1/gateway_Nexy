@@ -149,7 +149,7 @@ class AhlLib:
                 changed.extend(self._polling_table.get(bit, []))
         return changed
 
-    async def poll_params(self, handler: Any) -> list[int]:
+    async def poll_params(self, handler: Any, force_read_all: bool = False) -> list[int]:
         """Poll AHL lift for changed parameters via bitmask.
 
         Reads PARAM_POLLING (register 2), decodes the bitmask to find
@@ -158,21 +158,27 @@ class AhlLib:
 
         Args:
             handler: ModBusHandler instance for hardware communication.
+            force_read_all: When True, skip the bitmask read and treat
+                every group as changed — used by LiftProxy on the first
+                poll cycle to populate the db from a cold start.
 
         Returns:
             List of parameter IDs whose values actually changed.
         """
-        # Read the change-flags bitmask (param 2)
-        value, _, code = await asyncio.to_thread(
-            handler.read_parameter, ["2"]
-        )
-        if code != MbCode.NO_ERR.name:
-            self.logger.warning("Failed to read PARAM_POLLING: %s", code)
-            return []
+        if force_read_all:
+            bitmask = 0x7FFFFFFF
+        else:
+            # Read the change-flags bitmask (param 2)
+            value, _, code = await asyncio.to_thread(
+                handler.read_parameter, ["2"]
+            )
+            if code != MbCode.NO_ERR.name:
+                self.logger.warning("Failed to read PARAM_POLLING: %s", code)
+                return []
 
-        bitmask = int(value)
-        if bitmask == 0:
-            return []
+            bitmask = int(value)
+            if bitmask == 0:
+                return []
 
         candidate_params = self.decode_change_flags(bitmask)
         changed: list[int] = []

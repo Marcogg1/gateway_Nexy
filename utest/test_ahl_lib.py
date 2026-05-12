@@ -453,6 +453,57 @@ class TestAhlPollParams(unittest.TestCase):
         self.assertNotIn(0, result)
         self.assertIn(1, result)
 
+    @async_test
+    async def test_force_read_all_skips_bitmask_read(self):
+        """force_read_all=True must not call handler.read_parameter(['2'])."""
+        def fake_read(args):
+            if args == ["2"]:
+                raise AssertionError("Bitmask param 2 should not be read")
+            return (7, "ModBusHandler", MbCode.NO_ERR.name)
+
+        self.handler.read_parameter.side_effect = fake_read
+        result = await self.ahl.poll_params(self.handler, force_read_all=True)
+        self.assertIn(0, result)
+        self.assertIn(15, result)
+
+    @async_test
+    async def test_force_read_all_reads_every_group_old_table(self):
+        """Old table covers bits 0-31 → every param id in those groups gets read."""
+        reads: list[str] = []
+
+        def fake_read(args):
+            reads.append(args[0])
+            return (1, "ModBusHandler", MbCode.NO_ERR.name)
+
+        self.handler.read_parameter.side_effect = fake_read
+        await self.ahl.poll_params(self.handler, force_read_all=True)
+        self.assertNotIn("2", reads)
+        for pid in (0, 16, 32, 48, 64, 80, 94, 110, 126):
+            self.assertIn(str(pid), reads, f"Param {pid} not read")
+
+    @async_test
+    async def test_force_read_all_reads_every_group_new_table(self):
+        """New polling table also reachable via force-read."""
+        self.ahl.set_polling_table(True)
+        reads: list[str] = []
+
+        def fake_read(args):
+            reads.append(args[0])
+            return (1, "ModBusHandler", MbCode.NO_ERR.name)
+
+        self.handler.read_parameter.side_effect = fake_read
+        await self.ahl.poll_params(self.handler, force_read_all=True)
+        self.assertNotIn("2", reads)
+        for pid in (127, 128, 129, 340, 344, 345):
+            self.assertIn(str(pid), reads, f"Param {pid} not read")
+
+    @async_test
+    async def test_default_call_still_reads_bitmask(self):
+        """Regression: poll_params() without kwarg still reads param 2."""
+        self.handler.read_parameter.return_value = (0, "ModBusHandler", MbCode.NO_ERR.name)
+        await self.ahl.poll_params(self.handler)
+        self.handler.read_parameter.assert_called_once_with(["2"])
+
 
 if __name__ == '__main__':
     unittest.main()
