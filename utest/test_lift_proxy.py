@@ -781,5 +781,40 @@ class TestPollingLoopForceRead(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(fresh._force_read_all)
 
 
+class TestRunReportsLiftType(unittest.IsolatedAsyncioTestCase):
+    """Tests for LiftProxy.run() reporting gw.liftType once on startup."""
+
+    def setUp(self):
+        self.proxy = LiftProxy()
+        self.proxy._lib = MagicMock()
+        self.proxy._lib.DEFAULT_ON_CHANGE_PARAMS = []
+        self.proxy._lib.DEFAULT_DAILY_PARAMS = []
+        self.proxy._lib.poll_params = AsyncMock(return_value=[])
+        self.proxy._handler = MagicMock()
+        self.event_sender = AsyncMock()
+        self.desired_handler = MagicMock()
+        self.desired_handler.desired_properties = {}
+        self.reporter = AsyncMock()
+
+    async def _run_one_tick(self):
+        """Start proxy.run, let it fire the report + one loop tick, then stop."""
+        async def mock_sleep(_seconds):
+            raise asyncio.CancelledError
+
+        with patch("liftApi.lift_proxy.asyncio.sleep", side_effect=mock_sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.proxy.run(self.event_sender, self.desired_handler, self.reporter)
+
+    async def test_reports_ahl(self):
+        self.proxy._lift_type = LiftType.AHL
+        await self._run_one_tick()
+        self.reporter.report_property.assert_awaited_once_with("gw.liftType", "AHL")
+
+    async def test_reports_one_k(self):
+        self.proxy._lift_type = LiftType.ONE_K
+        await self._run_one_tick()
+        self.reporter.report_property.assert_awaited_once_with("gw.liftType", "1k")
+
+
 if __name__ == "__main__":
     unittest.main()

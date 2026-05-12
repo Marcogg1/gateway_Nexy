@@ -8,6 +8,7 @@ import asyncio
 import time
 
 from cloudApi.device_twin_desired_handler import DeviceTwinDesiredHandler
+from cloudApi.device_twin_reported import DeviceTwinReporter
 from cloudApi.event_sender import EventSender
 from lib.ahl_lib import AhlLib
 from lib.error_signals import LpCode
@@ -185,16 +186,22 @@ class LiftProxy:
         self,
         event_sender: EventSender,
         desired_handler: DeviceTwinDesiredHandler,
+        reporter: DeviceTwinReporter,
     ) -> None:
-        """Start onChange and daily polling loops.
+        """Report lift type, then start onChange and daily polling loops.
+
+        Caller must ensure lift_type is identified before calling run().
 
         Args:
             event_sender: For sending telemetry events to IoT Hub.
             desired_handler: For reading param push lists and intervals
                 from device twin desired properties.
+            reporter: For patching reported twin properties. Used here to
+                announce the identified lift type once at startup.
         """
         self._event_sender = event_sender
         self._desired_handler = desired_handler
+        await reporter.report_property("gw.liftType", self._lift_type.value)
         await asyncio.gather(
             self._polling_loop(),
             self._daily_loop(),
