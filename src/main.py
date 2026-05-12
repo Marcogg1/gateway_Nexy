@@ -19,9 +19,15 @@ setup_logging()
 logger = get_logger(__name__)
 
 
-async def main():
+async def main(lift_sim_enabled: bool = False):
     """
-     Main asynchronous function to initialize and run the IoT device client.
+    Main asynchronous function to initialize and run the IoT device client.
+
+    Args:
+        lift_sim_enabled: When True, runs LiftSimulator's fake telemetry
+            and twin-reporting loops alongside the real lift data path.
+            Use only for cloud-pipeline testing without a connected lift.
+            Defaults to False so production runs do not emit fake data.
     """
     
     logger.info("Starting main")
@@ -61,7 +67,7 @@ async def main():
         method_handler = MethodRequestHandler(device_client)
         reporter = DeviceTwinReporter(device_client)
         send_event = EventSender(device_client, proxy.lift_type)
-        liftSim = LiftSimulator(reporter, send_event) # Init lift simulator, used for testing device twin reporting. Remove when not needed
+        lift_sim = LiftSimulator(reporter, send_event) if lift_sim_enabled else None
         desired_handler = await DeviceTwinDesiredHandler.create(device_client)
         heartbeat_handler = HeartbeatHandler(send_event, reporter, desired_handler)
     except Exception as e:
@@ -79,16 +85,20 @@ async def main():
         logger.error(f"Bluetooth server failed to start: {e}", exc_info=True)
 
     #Run in parallel
+    tasks = [
+        method_handler.listen_for_method(),
+        desired_handler.listen_for_desired_updates(),
+        heartbeat_handler.run(),
+        proxy.run(send_event, desired_handler),
+    ]
+    if lift_sim is not None:
+        tasks += [
+            lift_sim.report_temperature_loop(),
+            lift_sim.simulate_lift_operation(),
+            lift_sim.send_parameter_data(),
+        ]
     try:
-        await asyncio.gather(
-            method_handler.listen_for_method(),
-            desired_handler.listen_for_desired_updates(),
-            heartbeat_handler.run(),
-            proxy.run(send_event, desired_handler),
-            liftSim.report_temperature_loop(), # Start temperature reporting loop testing. Remove when not needed
-            liftSim.simulate_lift_operation(), # Simulate lift reporting, add properties. Remove when not needed
-            liftSim.send_parameter_data() # Simulate telemetry data sending. Remove when not needed
-        )
+        await asyncio.gather(*tasks)
     finally:
         if bluetooth_server is not None:
             try:
