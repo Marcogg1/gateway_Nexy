@@ -182,6 +182,8 @@ class ModBusHandler:
             parity="N",
             stopbits=1,
             bytesize=8,
+            retries=1,
+            handle_local_echo=True,
         )
 
         self.client.connect()
