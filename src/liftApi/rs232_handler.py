@@ -56,8 +56,9 @@ class Rs232Handler:
 
         self.tl: ThousandLib = tl
 
+        self.client: serial.Serial | None = None
         try:
-            self.client: serial.Serial = serial.Serial(port=self.rs_port,
+            self.client = serial.Serial(port=self.rs_port,
                                         baudrate=38400,
                                         parity=serial.PARITY_NONE,
                                         stopbits=serial.STOPBITS_ONE,
@@ -504,6 +505,7 @@ class Rs232Handler:
             return cmd, operation_type, data, self.name, self.rs232Codes.ARGS_IN_ELEM_ATTR_ERR.name
 
         self.logger.debug(f"Writing {msg}")
+        assert self.client is not None
         self.client.write(msg.encode('utf-8'))
 
         return cmd, operation_type, data, self.name, err_code
@@ -521,6 +523,7 @@ class Rs232Handler:
         rsp: str = ''
         retries: int = 5
         i: int = 0
+        assert self.client is not None
         while i < retries:
             try:
                 # The below two lines complain about "int not being callable", but in_waiting() is a callable,
@@ -1805,6 +1808,7 @@ if __name__ == "__main__":
             logger.error("Error: Input not json format")
             sys.exit(1)
 
+        assert obj.client is not None
         obj.client.write(input.encode('utf-8'))
 
         while 1:
