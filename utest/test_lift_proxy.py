@@ -815,6 +815,12 @@ class TestRunReportsLiftType(unittest.IsolatedAsyncioTestCase):
         await self._run_one_tick()
         self.reporter.report_property.assert_awaited_once_with("gw.liftType", "1k")
 
+    async def test_skips_report_when_unknown(self):
+        """Unidentified lift must not push 'unknown' to the device twin."""
+        self.proxy._lift_type = LiftType.UNKNOWN
+        await self._run_one_tick()
+        self.reporter.report_property.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -201,7 +201,12 @@ class LiftProxy:
         """
         self._event_sender = event_sender
         self._desired_handler = desired_handler
-        await reporter.report_property("gw.liftType", self._lift_type.value)
+        if self._lift_type == LiftType.UNKNOWN:
+            logger.warning(
+                "run() called with unidentified lift type — skipping liftType report"
+            )
+        else:
+            await reporter.report_property("gw.liftType", self._lift_type.value)
         await asyncio.gather(
             self._polling_loop(),
             self._daily_loop(),
