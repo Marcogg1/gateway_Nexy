@@ -780,6 +780,19 @@ class TestPollingLoopForceRead(unittest.IsolatedAsyncioTestCase):
         fresh = LiftProxy()
         self.assertTrue(fresh._force_read_all)
 
+    async def test_flag_stays_set_when_poll_raises(self):
+        """If poll_params raises on the first cycle, the flag must remain True so the next iteration retries the full read."""
+        self.proxy._lib.poll_params = AsyncMock(side_effect=RuntimeError("conn error"))
+
+        async def mock_sleep(_seconds):
+            raise asyncio.CancelledError
+
+        with patch("liftApi.lift_proxy.asyncio.sleep", side_effect=mock_sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.proxy._polling_loop()
+
+        self.assertTrue(self.proxy._force_read_all)
+
 
 class TestRunReportsLiftType(unittest.IsolatedAsyncioTestCase):
     """Tests for LiftProxy.run() reporting gw.liftType once on startup."""
