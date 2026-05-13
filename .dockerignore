@@ -14,8 +14,7 @@ tests
 docs
 typings
 *.tar
-gateway-blechar.tar
-gateway-dev.tar
+build/
 *.md
 !README.md
 azure-pipelines.yml

@@ -4,9 +4,15 @@
 # Output is a classic single-manifest Docker tar (no attestations, no manifest
 # list) so the legacy dockerd on the gateway / LuCI dockerman can parse it.
 #
-# Each build gets a unique timestamp tag (e.g. gateway:dev-20260508-152300) so
-# re-uploading does not strip the tag from the previous image and break the
-# container's image reference. Override with IMAGE_TAG=... if needed.
+# Each build gets a short timestamp tag (e.g. gateway:dev05121525, encoding
+# month/day/hour/minute) so re-uploading does not strip the tag from a
+# previous image and break the container's image reference. Override with
+# IMAGE_TAG=... .
+#
+# The .tar is written to build/gateway-dev.tar (fixed filename, overwritten
+# each run) so only the latest build is kept locally. The build/ directory
+# is gitignored and dockerignored so old tars do not bloat the next image.
+# Override with OUTPUT=... .
 #
 # Deploy:
 #   1. LuCI > Docker > Images > Load             -> upload the .tar
@@ -15,12 +21,12 @@
 #   3. Run Application = ON so ENTRYPOINT fires (starts sshd).
 set -euo pipefail
 
-STAMP="$(date +%Y%m%d-%H%M%S)"
-IMAGE_TAG="${IMAGE_TAG:-gateway:dev-${STAMP}}"
+STAMP="$(date +%m%d%H%M)"
+IMAGE_TAG="${IMAGE_TAG:-gateway:dev${STAMP}}"
 DOCKERFILE="${DOCKERFILE:-Dockerfile.dev}"
 PLATFORM="${PLATFORM:-linux/arm64}"
-OUTPUT="${OUTPUT:-${IMAGE_TAG//:/-}.tar}"
-OUTPUT="${OUTPUT//\//-}"
+OUTPUT="${OUTPUT:-build/gateway-dev.tar}"
+mkdir -p "$(dirname "$OUTPUT")"
 
 export DOCKER_BUILDKIT=1
 

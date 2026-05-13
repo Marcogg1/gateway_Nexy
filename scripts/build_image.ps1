@@ -3,9 +3,15 @@
 # Output is a classic single-manifest Docker tar (no attestations, no manifest
 # list) so the legacy dockerd on the gateway / LuCI dockerman can parse it.
 #
-# Each build gets a unique timestamp tag (e.g. gateway:dev-20260508-152300) so
-# re-uploading does not strip the tag from the previous image and break the
-# container's image reference. Override with $env:IMAGE_TAG if needed.
+# Each build gets a short timestamp tag (e.g. gateway:dev05121525, encoding
+# month/day/hour/minute) so re-uploading does not strip the tag from a
+# previous image and break the container's image reference. Override with
+# $env:IMAGE_TAG.
+#
+# The .tar is written to build/gateway-dev.tar (fixed filename, overwritten
+# each run) so only the latest build is kept locally. The build/ directory
+# is gitignored and dockerignored so old tars do not bloat the next image.
+# Override with $env:OUTPUT.
 #
 # Deploy:
 #   1. LuCI > Docker > Images > Load             -> upload the .tar
@@ -17,12 +23,13 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
-$Stamp      = Get-Date -Format 'yyyyMMdd-HHmmss'
-$ImageTag   = if ($env:IMAGE_TAG)  { $env:IMAGE_TAG }  else { "gateway:dev-$Stamp" }
+$Stamp      = Get-Date -Format 'MMddHHmm'
+$ImageTag   = if ($env:IMAGE_TAG)  { $env:IMAGE_TAG }  else { "gateway:dev$Stamp" }
 $Dockerfile = if ($env:DOCKERFILE) { $env:DOCKERFILE } else { 'Dockerfile.dev' }
 $Platform   = if ($env:PLATFORM)   { $env:PLATFORM }   else { 'linux/arm64' }
-$Output     = if ($env:OUTPUT)     { $env:OUTPUT }     else { ($ImageTag -replace ':', '-') + '.tar' }
-$Output     = $Output -replace '/', '-'
+$BuildDir = Join-Path (Get-Location) 'build'
+New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
+$Output   = if ($env:OUTPUT) { $env:OUTPUT } else { Join-Path $BuildDir 'gateway-dev.tar' }
 
 $env:DOCKER_BUILDKIT = '1'
 
