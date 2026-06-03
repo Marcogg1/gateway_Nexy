@@ -1,6 +1,7 @@
 import asyncio
 from bluetoothApi.server import build_from_env as build_bluetooth_server
 from bluetoothApi.wifi_cli import WifiCli
+from cloudApi.connection_monitor import ConnectionMonitor
 from cloudApi.dps_client import DPSClient
 from cloudApi.device_client import DeviceClientFactory
 from cloudApi.method_request_handler import MethodRequestHandler
@@ -70,6 +71,8 @@ async def main(lift_sim_enabled: bool = False):
         lift_sim = LiftSimulator(reporter, send_event) if lift_sim_enabled else None
         desired_handler = await DeviceTwinDesiredHandler.create(device_client)
         heartbeat_handler = HeartbeatHandler(send_event, reporter, desired_handler)
+        connection_monitor = ConnectionMonitor(device_client)
+        connection_monitor.attach()
     except Exception as e:
         logger.error(f"Handler initialization failed: {e}", exc_info=True)
         return

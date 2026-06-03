@@ -12,6 +12,7 @@ if SRC_ROOT not in sys.path:
     sys.path.insert(0, SRC_ROOT)
 
 from cloudApi.blob_upload_handler import upload_to_blob
+from cloudApi.connection_monitor import ConnectionMonitor
 from cloudApi.device_client import DeviceClientFactory
 from cloudApi.device_twin_desired_handler import DeviceTwinDesiredHandler
 from cloudApi.device_twin_reported import DeviceTwinReporter
@@ -261,6 +262,53 @@ class TestBlobUploadHandler(unittest.IsolatedAsyncioTestCase):
             500,
             "boom"
         )
+
+
+class TestConnectionMonitor(unittest.IsolatedAsyncioTestCase):
+    async def test_attach_registers_handlers(self):
+        device_client = MagicMock()
+        monitor = ConnectionMonitor(device_client)
+
+        monitor.attach()
+
+        self.assertEqual(
+            device_client.on_connection_state_change,
+            monitor._on_connection_state_change,
+        )
+        self.assertEqual(
+            device_client.on_background_exception,
+            monitor._on_background_exception,
+        )
+
+    async def test_logs_connected(self):
+        device_client = MagicMock()
+        device_client.connected = True
+        monitor = ConnectionMonitor(device_client)
+
+        with self.assertLogs("cloudApi.connection_monitor", level="INFO") as cm:
+            await monitor._on_connection_state_change()
+
+        self.assertIn("Connection to IoT Hub updated: CONNECTED", cm.output[0])
+
+    async def test_logs_disconnected(self):
+        device_client = MagicMock()
+        device_client.connected = False
+        monitor = ConnectionMonitor(device_client)
+
+        with self.assertLogs("cloudApi.connection_monitor", level="INFO") as cm:
+            await monitor._on_connection_state_change()
+
+        self.assertIn("Connection to IoT Hub updated: DISCONNECTED", cm.output[0])
+
+    async def test_logs_background_exception(self):
+        device_client = MagicMock()
+        monitor = ConnectionMonitor(device_client)
+        exc = ValueError("pipeline boom")
+
+        with self.assertLogs("cloudApi.connection_monitor", level="ERROR") as cm:
+            await monitor._on_background_exception(exc)
+
+        self.assertIn("pipeline boom", cm.output[0])
 
 
 if __name__ == "__main__":
