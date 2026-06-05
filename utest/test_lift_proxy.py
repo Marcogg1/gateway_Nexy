@@ -558,7 +558,9 @@ class TestPollParams(unittest.IsolatedAsyncioTestCase):
         self.proxy._lib.poll_params = AsyncMock(return_value=[5, 6])
         result = await self.proxy.poll_params()
         self.assertEqual(result, [5, 6])
-        self.proxy._lib.poll_params.assert_called_once_with(self.proxy._handler)
+        self.proxy._lib.poll_params.assert_called_once_with(
+            self.proxy._handler, force_read_all=False
+        )
 
     async def test_returns_empty_when_lib_none(self):
         self.proxy._lib = None
@@ -703,6 +705,134 @@ class TestLiftProxyIdleSupervisor(LiftProxyTestBase):
             ParamChange(22, 100),
             ParamChange(24, 300),
         ])
+
+
+class TestProxyPollParamsForceRead(unittest.IsolatedAsyncioTestCase):
+    """Tests for LiftProxy.poll_params force_read_all forwarding."""
+
+    def setUp(self):
+        self.proxy = LiftProxy()
+        self.proxy._lib = MagicMock()
+        self.proxy._lib.poll_params = AsyncMock(return_value=[5])
+        self.proxy._handler = MagicMock()
+
+    async def test_forwards_force_read_all_true(self):
+        await self.proxy.poll_params(force_read_all=True)
+        self.proxy._lib.poll_params.assert_awaited_once_with(
+            self.proxy._handler, force_read_all=True
+        )
+
+    async def test_returns_empty_when_handler_none(self):
+        self.proxy._handler = None
+        result = await self.proxy.poll_params(force_read_all=True)
+        self.assertEqual(result, [])
+
+
+class TestPollingLoopForceRead(unittest.IsolatedAsyncioTestCase):
+    """Tests for LiftProxy._polling_loop force-read-all on first iteration."""
+
+    def setUp(self):
+        self.proxy = LiftProxy()
+        self.proxy._lib = MagicMock()
+        self.proxy._lib.DEFAULT_ON_CHANGE_PARAMS = [5, 6]
+        self.proxy._lib.get_param.return_value = (42, "NO_ERR")
+        self.proxy._lib.poll_params = AsyncMock(return_value=[])
+        self.proxy._handler = MagicMock()
+        self.proxy._event_sender = AsyncMock()
+        self.proxy._desired_handler = MagicMock()
+        self.proxy._desired_handler.desired_properties = {}
+
+    async def test_first_iter_passes_force_read_all_true(self):
+        cycle_count = 0
+
+        async def mock_sleep(_seconds):
+            nonlocal cycle_count
+            cycle_count += 1
+            if cycle_count >= 2:
+                raise asyncio.CancelledError
+
+        with patch("liftApi.lift_proxy.asyncio.sleep", side_effect=mock_sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.proxy._polling_loop()
+
+        self.assertEqual(self.proxy._lib.poll_params.await_count, 2)
+        self.proxy._lib.poll_params.assert_any_await(
+            self.proxy._handler, force_read_all=True
+        )
+        self.proxy._lib.poll_params.assert_any_await(
+            self.proxy._handler, force_read_all=False
+        )
+        first_call, second_call = self.proxy._lib.poll_params.await_args_list
+        self.assertTrue(first_call.kwargs["force_read_all"])
+        self.assertFalse(second_call.kwargs["force_read_all"])
+
+    async def test_flag_cleared_after_first_iter(self):
+        async def mock_sleep(_seconds):
+            raise asyncio.CancelledError
+
+        with patch("liftApi.lift_proxy.asyncio.sleep", side_effect=mock_sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.proxy._polling_loop()
+
+        self.assertFalse(self.proxy._force_read_all)
+
+    async def test_flag_initially_true(self):
+        fresh = LiftProxy()
+        self.assertTrue(fresh._force_read_all)
+
+    async def test_flag_stays_set_when_poll_raises(self):
+        """If poll_params raises on the first cycle, the flag must remain True so the next iteration retries the full read."""
+        self.proxy._lib.poll_params = AsyncMock(side_effect=RuntimeError("conn error"))
+
+        async def mock_sleep(_seconds):
+            raise asyncio.CancelledError
+
+        with patch("liftApi.lift_proxy.asyncio.sleep", side_effect=mock_sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.proxy._polling_loop()
+
+        self.assertTrue(self.proxy._force_read_all)
+
+
+class TestRunReportsLiftType(unittest.IsolatedAsyncioTestCase):
+    """Tests for LiftProxy.run() reporting gw.liftType once on startup."""
+
+    def setUp(self):
+        self.proxy = LiftProxy()
+        self.proxy._lib = MagicMock()
+        self.proxy._lib.DEFAULT_ON_CHANGE_PARAMS = []
+        self.proxy._lib.DEFAULT_DAILY_PARAMS = []
+        self.proxy._lib.poll_params = AsyncMock(return_value=[])
+        self.proxy._handler = MagicMock()
+        self.event_sender = AsyncMock()
+        self.desired_handler = MagicMock()
+        self.desired_handler.desired_properties = {}
+        self.reporter = AsyncMock()
+
+    async def _run_one_tick(self):
+        """Start proxy.run, let it fire the report + one loop tick, then stop."""
+        async def mock_sleep(_seconds):
+            raise asyncio.CancelledError
+
+        with patch("liftApi.lift_proxy.asyncio.sleep", side_effect=mock_sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                await self.proxy.run(self.event_sender, self.desired_handler, self.reporter)
+
+    async def test_reports_ahl(self):
+        self.proxy._lift_type = LiftType.AHL
+        await self._run_one_tick()
+        self.reporter.report_property.assert_awaited_once_with("gw.liftType", "AHL")
+
+    async def test_reports_one_k(self):
+        self.proxy._lift_type = LiftType.ONE_K
+        await self._run_one_tick()
+        self.reporter.report_property.assert_awaited_once_with("gw.liftType", "1k")
+
+    async def test_skips_report_when_unknown(self):
+        """Unidentified lift must not push 'unknown' to the device twin."""
+        self.proxy._lift_type = LiftType.UNKNOWN
+        await self._run_one_tick()
+        self.reporter.report_property.assert_not_awaited()
 
 
 if __name__ == "__main__":

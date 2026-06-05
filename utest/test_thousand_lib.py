@@ -2258,6 +2258,21 @@ class TestThousandLibPollParams(unittest.TestCase):
         result = await self.tl.poll_params(self.handler)
         self.assertEqual(result, [10])
 
+    @async_test
+    async def test_force_read_all_passes_poll_type_1(self):
+        """force_read_all=True must call handler.poll_lift(['1']) (all packages)."""
+        self.handler.poll_lift.return_value = ("10x42", "Rs232Handler", self.Rs232Code.NO_ERR.name)
+        result = await self.tl.poll_params(self.handler, force_read_all=True)
+        self.handler.poll_lift.assert_called_once_with(["1"])
+        self.assertEqual(result, [10, 42])
+
+    @async_test
+    async def test_default_call_still_passes_poll_type_0(self):
+        """Regression: poll_params() without kwarg passes ['0']."""
+        self.handler.poll_lift.return_value = ("10", "Rs232Handler", self.Rs232Code.NO_ERR.name)
+        await self.tl.poll_params(self.handler)
+        self.handler.poll_lift.assert_called_once_with(["0"])
+
 
 def set_up_mocked_database():
     database = dict()

@@ -8,6 +8,7 @@ import asyncio
 import time
 
 from cloudApi.device_twin_desired_handler import DeviceTwinDesiredHandler
+from cloudApi.device_twin_reported import DeviceTwinReporter
 from cloudApi.event_sender import EventSender
 from lib.ahl_lib import AhlLib
 from lib.error_signals import LpCode
@@ -45,6 +46,7 @@ class LiftProxy:
         self._desired_handler: DeviceTwinDesiredHandler | None = None
         self._handler_lock: asyncio.Lock = asyncio.Lock()
         self._idle_supervisor: IdleSupervisor | None = idle_supervisor
+        self._force_read_all: bool = True
 
     @classmethod
     async def create(
@@ -157,12 +159,18 @@ class LiftProxy:
             self._lib.set_param(int(param), int(value))
         return status, source, code
 
-    async def poll_params(self) -> list[int]:
+    async def poll_params(self, force_read_all: bool = False) -> list[int]:
         """Poll lift hardware for changed parameters.
 
         Delegates to the lib's poll_params method, which handles the
         hardware-specific polling strategy internally (bitmask decode
         for AHL, package-based poll for 1K).
+
+        Args:
+            force_read_all: When True, force the lib to read every
+                parameter from hardware instead of only those reported
+                as changed. Used by the first polling cycle to populate
+                the db on cold start.
 
         Returns:
             List of parameter IDs that changed since last poll.
@@ -170,32 +178,53 @@ class LiftProxy:
         if self._lib is None or self._handler is None:
             return []
         async with self._handler_lock:
-            return await self._lib.poll_params(self._handler)
+            return await self._lib.poll_params(
+                self._handler, force_read_all=force_read_all
+            )
 
     async def run(
         self,
         event_sender: EventSender,
         desired_handler: DeviceTwinDesiredHandler,
+        reporter: DeviceTwinReporter,
     ) -> None:
-        """Start onChange and daily polling loops.
+        """Report lift type, then start onChange and daily polling loops.
+
+        Caller must ensure lift_type is identified before calling run().
 
         Args:
             event_sender: For sending telemetry events to IoT Hub.
             desired_handler: For reading param push lists and intervals
                 from device twin desired properties.
+            reporter: For patching reported twin properties. Used here to
+                announce the identified lift type once at startup.
         """
         self._event_sender = event_sender
         self._desired_handler = desired_handler
+        if self._lift_type == LiftType.UNKNOWN:
+            logger.warning(
+                "run() called with unidentified lift type — skipping liftType report"
+            )
+        else:
+            await reporter.report_property("gw.liftType", self._lift_type.value)
         await asyncio.gather(
             self._polling_loop(),
             self._daily_loop(),
         )
 
     async def _polling_loop(self) -> None:
-        """Keep db fresh by polling hardware; push onChange params, notify supervisor."""
+        """Keep db fresh by polling hardware; push onChange params, notify supervisor.
+
+        On the very first cycle the lib is asked to read every parameter
+        (matching legacy `m_force_read_all`) so the db is fully populated
+        from a cold start and the first push carries the full onChange
+        list. The flag is cleared after the call returns; a raising call
+        leaves the flag set and the next iteration retries.
+        """
         while True:
             try:
-                changed = await self.poll_params()
+                changed = await self.poll_params(force_read_all=self._force_read_all)
+                self._force_read_all = False
                 if changed:
                     await self._notify_supervisor(changed)
                     push_list = self._get_param_push_list("onChange")

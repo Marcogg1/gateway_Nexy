@@ -89,7 +89,7 @@ async def main(lift_sim_enabled: bool = False):
         method_handler.listen_for_method(),
         desired_handler.listen_for_desired_updates(),
         heartbeat_handler.run(),
-        proxy.run(send_event, desired_handler),
+        proxy.run(send_event, desired_handler, reporter),
     ]
     if lift_sim is not None:
         tasks += [
