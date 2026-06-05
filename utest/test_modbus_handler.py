@@ -58,7 +58,6 @@ class TestModBusHandler(unittest.TestCase):
         print(f"\nSetup: {self._testMethodName}")
         # Mock serial + RS485 + disk to avoid hardware dependency
         with patch("pymodbus.client.ModbusSerialClient"), \
-             patch("liftApi.modbus_handler.RS485Serial"), \
              patch("filemgmt.disk_handler.DiskHandler"):
             self.handler = ModBusHandler()
             self.handler.disk_handler = MagicMock()

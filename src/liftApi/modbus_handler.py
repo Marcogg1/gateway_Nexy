@@ -28,7 +28,6 @@ from pymodbus.pdu.file_message import WriteFileRecordResponse
 from filemgmt.disk_handler import DiskHandler
 from lib.error_signals import MbCode
 from lib.logging_config import get_logger, setup_logging
-from lib.rs485_serial import RS485Serial
 from liftApi.modbus_file_record import ReadFileRecord, WriteFileRecord
 
 setup_logging()
@@ -137,8 +136,6 @@ class ModBusHandler:
         self._modbus_link = False
         self.name = MbCode.SOURCE.value
         self.rs_port = "/dev/ttyLP1"
-        self.gpio_chip = "/dev/gpiochip1"
-        self.de_line = 2
         self.lcm_address = 0x0A
         self.client: ModbusSerialClient | None = None
 
@@ -171,7 +168,18 @@ class ModBusHandler:
         return config
 
     def _setup_connection(self) -> None:
-        """Open Modbus serial connection on the onboard RS485 bus."""
+        """Open Modbus serial connection on the onboard RS485 bus.
+
+        The RS485 transceiver's DE signal is driven by the kernel/devicetree
+        (rs485-enabled-at-boot), so no userspace DE toggling is needed —
+        pymodbus's own serial.Serial socket is used directly.
+
+        handle_local_echo=False: the NexyHub bus does not echo TX; True makes
+        pymodbus wait for echo bytes that never arrive, doubling cycle time
+        and dropping frames. retries=0: the clean kernel-DE bus reads at 100%
+        single-shot, so internal retry only adds latency — app-level retry
+        handles the rare miss. Both confirmed by modbus-probe native_config.
+        """
         self._modbus_link = os.path.exists(self.rs_port)
         logger.info("Using port %s", self.rs_port)
 
@@ -182,26 +190,10 @@ class ModBusHandler:
             parity="N",
             stopbits=1,
             bytesize=8,
-            retries=1,
-            handle_local_echo=True,
+            retries=0,
+            handle_local_echo=False,
         )
-
         self.client.connect()
-        try:
-            if self.client.socket is not None:
-                self.client.socket.close()
-        except Exception:  # pylint: disable=broad-exception-caught
-            pass
-        self.client.socket = RS485Serial(
-            port=self.rs_port,
-            baudrate=115200,
-            timeout=3,
-            parity="N",
-            stopbits=1,
-            bytesize=8,
-            gpio_chip=self.gpio_chip,
-            de_line=self.de_line,
-        )
 
     def _test_connection(self) -> bool:
         """Test if onboard RS485 device exists.
