@@ -126,6 +126,23 @@ class MethodRequestHandler:
             return None
         return str(payload[key])
 
+    @staticmethod
+    def _get_int_str(payload: JSONSerializable, key: str) -> str | None:
+        """Return payload[key] as a string if it is integer-valued, else None.
+
+        Used for parameter indices: keeps the original string for the response
+        envelope while guaranteeing the later int() conversion cannot raise
+        (a non-numeric value yields a clean 400 instead of an uncaught 500).
+        """
+        if not isinstance(payload, dict) or key not in payload:
+            return None
+        text = str(payload[key])
+        try:
+            int(text)
+        except (TypeError, ValueError):
+            return None
+        return text
+
     def _download_max_bytes(self) -> int:
         """Effective download size cap: twin desired property, else config default."""
         default = Config.DOWNLOAD_MAX_BYTES_DEFAULT
@@ -197,7 +214,7 @@ class MethodRequestHandler:
 
     async def _la_read_parameter(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
         """Read a single lift parameter from the cache."""
-        param = self._get_str(payload, "parameter")
+        param = self._get_int_str(payload, "parameter")
         if param is None:
             return self._arg_error()
         value, code = self._proxy.get_param_value(int(param))
@@ -234,7 +251,7 @@ class MethodRequestHandler:
 
     async def _la_write_parameter(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
         """Write a single lift parameter and emit telemetry on success."""
-        param = self._get_str(payload, "parameter")
+        param = self._get_int_str(payload, "parameter")
         value = self._get_str(payload, "value")
         if param is None or value is None:
             return self._arg_error()
@@ -250,7 +267,7 @@ class MethodRequestHandler:
 
     async def _la_write_read_parameter(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
         """Write a parameter, then read it back from the (now-updated) cache."""
-        param = self._get_str(payload, "parameter")
+        param = self._get_int_str(payload, "parameter")
         value = self._get_str(payload, "value")
         if param is None or value is None:
             return self._arg_error()

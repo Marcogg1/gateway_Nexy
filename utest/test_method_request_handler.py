@@ -119,6 +119,13 @@ class TestReadDdms(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 400)
         self.assertEqual(payload["ec"], "ARG_ERR")
 
+    async def test_read_parameter_non_numeric_400(self, _ts):
+        handler = make_handler()
+        status, payload = await run_one(
+            handler, "la.read.parameter", {"parameter": "abc"})
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["ec"], "ARG_ERR")
+
     async def test_read_parameters_mixed(self, _ts):
         proxy = MagicMock()
         proxy.get_param_value.side_effect = [(125, LpCode.NO_ERR), (-1, LpCode.PARAM_NOT_IN_DB)]
@@ -181,6 +188,25 @@ class TestWriteDdms(unittest.IsolatedAsyncioTestCase):
         handler = make_handler()
         status, payload = await run_one(handler, "la.write.parameter", {"parameter": "1"})
         self.assertEqual(status, 400)
+
+    async def test_write_parameter_non_numeric_param_400(self, _ts):
+        proxy = MagicMock()
+        proxy.write_param = AsyncMock()
+        handler = make_handler(proxy=proxy)
+        status, payload = await run_one(
+            handler, "la.write.parameter", {"parameter": "abc", "value": "7"})
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["ec"], "ARG_ERR")
+        proxy.write_param.assert_not_awaited()
+
+    async def test_write_read_parameter_non_numeric_param_400(self, _ts):
+        proxy = MagicMock()
+        proxy.write_param = AsyncMock()
+        handler = make_handler(proxy=proxy)
+        status, payload = await run_one(
+            handler, "la.write.read.parameter", {"parameter": "abc", "value": "7"})
+        self.assertEqual(status, 400)
+        proxy.write_param.assert_not_awaited()
 
     async def test_write_read_parameter_collapses_readback(self, _ts):
         proxy = MagicMock()
