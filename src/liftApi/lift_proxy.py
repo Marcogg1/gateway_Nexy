@@ -177,6 +177,28 @@ class LiftProxy:
             return value, source, code
         return None, LpCode.SOURCE.value, LpCode.INIT_ERR.name
 
+    async def write_ar_number(self, value: str) -> tuple[Any, str, str]:
+        """Write the article (AR) number, dispatched by lift type.
+
+        AHL param 96 is read-only, so AHL writes are rejected. 1k writes
+        the ``liftRef1`` generic-text package and returns the actual text.
+
+        Args:
+            value: New AR number string.
+
+        Returns:
+            Tuple of (actual_value, error_source, error_code). actual_value
+            is None on rejection/init failure.
+        """
+        if self._lift_type == LiftType.AHL:
+            return None, LpCode.SOURCE.value, LpCode.PARAM_READ_ONLY.name
+        if self._lift_type == LiftType.ONE_K and self._handler is not None:
+            async with self._handler_lock:
+                return await asyncio.to_thread(
+                    self._handler.write_generic_text, ["liftRef1", value]
+                )
+        return None, LpCode.SOURCE.value, LpCode.INIT_ERR.name
+
     async def write_param(self, param: str, value: str) -> tuple[int, str, str]:
         """Write a parameter value to lift hardware via the handler.
 

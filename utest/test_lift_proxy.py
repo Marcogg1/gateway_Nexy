@@ -882,5 +882,30 @@ class TestReadArNumber(LiftProxyTestBase):
         self.assertEqual((value, source, code), (None, "LiftProxy", "INIT_ERR"))
 
 
+class TestWriteArNumber(LiftProxyTestBase):
+    """Tests for LiftProxy.write_ar_number()."""
+
+    async def test_ahl_rejects_read_only(self):
+        proxy = LiftProxy()
+        proxy._lift_type = LiftType.AHL
+        value, source, code = await proxy.write_ar_number("998877")
+        self.assertEqual((value, source, code), (None, "LiftProxy", "PARAM_READ_ONLY"))
+
+    async def test_1k_writes_liftref1(self):
+        proxy = LiftProxy()
+        proxy._lift_type = LiftType.ONE_K
+        proxy._handler = MagicMock()
+        proxy._handler.write_generic_text.return_value = ("AR563412", "Rs232Handler", "NO_ERR")
+        value, source, code = await proxy.write_ar_number("AR563412")
+        proxy._handler.write_generic_text.assert_called_once_with(["liftRef1", "AR563412"])
+        self.assertEqual((value, source, code), ("AR563412", "Rs232Handler", "NO_ERR"))
+
+    async def test_unknown_returns_init_err(self):
+        proxy = LiftProxy()
+        proxy._lift_type = LiftType.UNKNOWN
+        value, source, code = await proxy.write_ar_number("x")
+        self.assertEqual((value, source, code), (None, "LiftProxy", "INIT_ERR"))
+
+
 if __name__ == "__main__":
     unittest.main()
