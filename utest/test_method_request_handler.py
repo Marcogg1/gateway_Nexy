@@ -149,3 +149,56 @@ class TestReadDdms(unittest.IsolatedAsyncioTestCase):
         status, payload = await run_one(handler, "la.read.lift-type", {})
         self.assertEqual(status, 200)
         self.assertEqual(payload, {"ts": FIXED_TS, "lt": "2"})
+
+
+@patch("cloudApi.method_request_handler._now", return_value=FIXED_TS)
+class TestWriteDdms(unittest.IsolatedAsyncioTestCase):
+    async def test_write_parameter_success_emits_telemetry(self, _ts):
+        proxy = MagicMock()
+        proxy.write_param = AsyncMock(return_value=(0, "ModBusHandler", "NO_ERR"))
+        proxy.push_param_event = AsyncMock()
+        handler = make_handler(proxy=proxy)
+        status, payload = await run_one(
+            handler, "la.write.parameter", {"parameter": "1", "value": "7"})
+        self.assertEqual(status, 200)
+        self.assertEqual(payload, {"ts": FIXED_TS, "d": [{"p": "1", "v": "7", "s": "0"}]})
+        proxy.push_param_event.assert_awaited_once_with([1])
+
+    async def test_write_parameter_failure_no_telemetry(self, _ts):
+        proxy = MagicMock()
+        proxy.write_param = AsyncMock(return_value=(-1, "ModBusHandler", "LCM_ERR"))
+        proxy.push_param_event = AsyncMock()
+        handler = make_handler(proxy=proxy)
+        status, payload = await run_one(
+            handler, "la.write.parameter", {"parameter": "1", "value": "7"})
+        self.assertEqual(payload["d"][0]["s"], "-1")
+        self.assertEqual(payload["d"][0]["ec"], "LCM_ERR")
+        self.assertEqual(payload["es"], "ModBusHandler")
+        proxy.push_param_event.assert_not_awaited()
+
+    async def test_write_parameter_missing_field_400(self, _ts):
+        handler = make_handler()
+        status, payload = await run_one(handler, "la.write.parameter", {"parameter": "1"})
+        self.assertEqual(status, 400)
+
+    async def test_write_read_parameter_collapses_readback(self, _ts):
+        proxy = MagicMock()
+        proxy.write_param = AsyncMock(return_value=(0, "ModBusHandler", "NO_ERR"))
+        proxy.push_param_event = AsyncMock()
+        proxy.get_param_value.return_value = (7, LpCode.NO_ERR)
+        handler = make_handler(proxy=proxy)
+        status, payload = await run_one(
+            handler, "la.write.read.parameter", {"parameter": "1", "value": "7"})
+        self.assertEqual(payload, {"ts": FIXED_TS, "d": [{"p": "1", "v": "7", "s": "0"}]})
+        proxy.push_param_event.assert_awaited_once_with([1])
+
+    async def test_write_read_parameter_write_fail(self, _ts):
+        proxy = MagicMock()
+        proxy.write_param = AsyncMock(return_value=(-1, "ModBusHandler", "LINK_ERR"))
+        proxy.push_param_event = AsyncMock()
+        handler = make_handler(proxy=proxy)
+        status, payload = await run_one(
+            handler, "la.write.read.parameter", {"parameter": "1", "value": "7"})
+        self.assertEqual(payload["d"][0]["ec"], "LINK_ERR")
+        self.assertEqual(payload["es"], "ModBusHandler")
+        proxy.push_param_event.assert_not_awaited()

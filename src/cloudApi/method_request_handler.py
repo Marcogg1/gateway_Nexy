@@ -232,16 +232,42 @@ class MethodRequestHandler:
         return {"ts": _now(), "lt": lt}, 200
 
     async def _la_write_parameter(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
-        """Write a single lift parameter."""
-        logger.debug(f"Payload: {payload}")
-        # TODO: send command and payload to correct handler
-        return {"result": True, "message": "la.write.parameter method executed"}, 200
+        """Write a single lift parameter and emit telemetry on success."""
+        param = self._get_str(payload, "parameter")
+        value = self._get_str(payload, "value")
+        if param is None or value is None:
+            return self._arg_error()
+        status, source, code = await self._proxy.write_param(param, value)
+        item: dict = {"p": param, "v": value, "s": str(status)}
+        env: dict = {"ts": _now(), "d": [item]}
+        if status == 0:
+            await self._proxy.push_param_event([int(param)])
+        else:
+            item["ec"] = code
+            env["es"] = source
+        return env, 200
 
     async def _la_write_read_parameter(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
-        """Write a lift parameter and read back the new value."""
-        logger.debug(f"Payload: {payload}")
-        # TODO: send command and payload to correct handler
-        return {"result": True, "message": "la.write.read.parameter method executed"}, 200
+        """Write a parameter, then read it back from the (now-updated) cache."""
+        param = self._get_str(payload, "parameter")
+        value = self._get_str(payload, "value")
+        if param is None or value is None:
+            return self._arg_error()
+        status, source, code = await self._proxy.write_param(param, value)
+        if status != 0:
+            return {
+                "ts": _now(),
+                "es": source,
+                "d": [{"p": param, "v": value, "s": str(status), "ec": code}],
+            }, 200
+        await self._proxy.push_param_event([int(param)])
+        rb_value, rb_code = self._proxy.get_param_value(int(param))
+        item: dict = {"p": param, "v": str(rb_value), "s": str(status)}
+        env: dict = {"ts": _now(), "d": [item]}
+        if rb_code != LpCode.NO_ERR:
+            item["ec"] = rb_code.name
+            env["es"] = LpCode.SOURCE.value
+        return env, 200
 
     async def _la_write_ar_number(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
         """Write the lift article number."""
