@@ -247,3 +247,15 @@ class LpCode(Enum):
     FILE_ERR = 11
     PARTIAL_ERR = 12
     DATA_ERR = 13
+
+
+@unique
+class MrhCode(Enum):
+    SOURCE = 'MethodRequestHandler'
+    NO_ERR = 0
+    ARG_ERR = 1
+    TYPE_ERR = 2
+    URL_ERR = 3
+    FILE_NAME_ERR = 4
+    SIZE_ERR = 5
+    DOWNLOAD_ERR = 6
