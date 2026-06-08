@@ -854,5 +854,33 @@ class TestReadParamLive(LiftProxyTestBase):
         self.assertEqual((value, source, code), ("123456", "ModBusHandler", "NO_ERR"))
 
 
+class TestReadArNumber(LiftProxyTestBase):
+    """Tests for LiftProxy.read_ar_number()."""
+
+    async def test_ahl_reads_param_96_live(self):
+        proxy = LiftProxy()
+        proxy._lift_type = LiftType.AHL
+        proxy._handler = MagicMock()
+        proxy._handler.read_parameter.return_value = ("998877", "ModBusHandler", "NO_ERR")
+        value, source, code = await proxy.read_ar_number()
+        proxy._handler.read_parameter.assert_called_once_with(["96"])
+        self.assertEqual((value, code), ("998877", "NO_ERR"))
+
+    async def test_1k_reads_liftref1_generic_text(self):
+        proxy = LiftProxy()
+        proxy._lift_type = LiftType.ONE_K
+        proxy._handler = MagicMock()
+        proxy._handler.get_generic_text.return_value = (["AR111222"], "Rs232Handler", "NO_ERR")
+        value, source, code = await proxy.read_ar_number()
+        proxy._handler.get_generic_text.assert_called_once_with("liftRef1")
+        self.assertEqual((value, source, code), ("AR111222", "Rs232Handler", "NO_ERR"))
+
+    async def test_unknown_returns_init_err(self):
+        proxy = LiftProxy()
+        proxy._lift_type = LiftType.UNKNOWN
+        value, source, code = await proxy.read_ar_number()
+        self.assertEqual((value, source, code), (None, "LiftProxy", "INIT_ERR"))
+
+
 if __name__ == "__main__":
     unittest.main()

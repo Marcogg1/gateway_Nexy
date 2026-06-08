@@ -12,7 +12,7 @@ from cloudApi.device_twin_desired_handler import DeviceTwinDesiredHandler
 from cloudApi.device_twin_reported import DeviceTwinReporter
 from cloudApi.event_sender import EventSender
 from lib.ahl_lib import AhlLib
-from lib.error_signals import LpCode
+from lib.error_signals import LpCode, Rs232Code
 from lib.logging_config import get_logger
 from lib.thousand_lib import ThousandLib
 from liftApi.idle_supervisor import IdleSupervisor, ParamChange
@@ -26,6 +26,7 @@ IDENTIFY_MAX_RETRIES = 10
 IDENTIFY_RETRY_DELAY = 5
 DEFAULT_ON_CHANGE_INTERVAL = 5      # seconds
 DEFAULT_DAILY_INTERVAL = 86400      # 24 hours
+AHL_AR_PARAM = 96
 
 
 class LiftProxy:
@@ -153,6 +154,28 @@ class LiftProxy:
             return None, LpCode.SOURCE.value, LpCode.INIT_ERR.name
         async with self._handler_lock:
             return await asyncio.to_thread(self._handler.read_parameter, [str(param)])
+
+    async def read_ar_number(self) -> tuple[Any, str, str]:
+        """Read the article (AR) number live, dispatched by lift type.
+
+        AHL stores the AR number in read-only param 96. 1k exposes it as
+        the ``liftRef1`` generic-text package.
+
+        Returns:
+            Tuple of (value, error_source, error_code). Value is a string
+            on success, None on init failure.
+        """
+        if self._lift_type == LiftType.AHL:
+            return await self.read_param_live(AHL_AR_PARAM)
+        if self._lift_type == LiftType.ONE_K and self._handler is not None:
+            async with self._handler_lock:
+                value, source, code = await asyncio.to_thread(
+                    self._handler.get_generic_text, "liftRef1"
+                )
+            if code == Rs232Code.NO_ERR.name and isinstance(value, list) and value:
+                return value[0], source, code
+            return value, source, code
+        return None, LpCode.SOURCE.value, LpCode.INIT_ERR.name
 
     async def write_param(self, param: str, value: str) -> tuple[int, str, str]:
         """Write a parameter value to lift hardware via the handler.
