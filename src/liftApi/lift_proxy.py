@@ -6,6 +6,7 @@ All lift access (cloud, WiFi, BT) goes through this proxy.
 
 import asyncio
 import time
+from typing import Any
 
 from cloudApi.device_twin_desired_handler import DeviceTwinDesiredHandler
 from cloudApi.device_twin_reported import DeviceTwinReporter
@@ -137,6 +138,21 @@ class LiftProxy:
         except KeyError:
             logger.warning("Unknown error code from lib: %s", err_code_name)
             return value, LpCode.COM_ERR
+
+    async def read_param_live(self, param: int) -> tuple[Any, str, str]:
+        """Read a parameter live from hardware (bypassing the cache).
+
+        Args:
+            param: Parameter number to read.
+
+        Returns:
+            Tuple of (value, error_source, error_code) from the handler,
+            or (None, LiftProxy, INIT_ERR) when no handler is initialised.
+        """
+        if self._handler is None:
+            return None, LpCode.SOURCE.value, LpCode.INIT_ERR.name
+        async with self._handler_lock:
+            return await asyncio.to_thread(self._handler.read_parameter, [str(param)])
 
     async def write_param(self, param: str, value: str) -> tuple[int, str, str]:
         """Write a parameter value to lift hardware via the handler.

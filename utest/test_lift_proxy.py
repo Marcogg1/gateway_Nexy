@@ -835,5 +835,24 @@ class TestRunReportsLiftType(unittest.IsolatedAsyncioTestCase):
         self.reporter.report_property.assert_not_awaited()
 
 
+class TestReadParamLive(LiftProxyTestBase):
+    """Tests for LiftProxy.read_param_live()."""
+
+    async def test_returns_init_err_without_handler(self):
+        proxy = LiftProxy()
+        value, source, code = await proxy.read_param_live(96)
+        self.assertIsNone(value)
+        self.assertEqual(source, "LiftProxy")
+        self.assertEqual(code, "INIT_ERR")
+
+    async def test_delegates_to_handler_read_parameter(self):
+        proxy = LiftProxy()
+        proxy._handler = MagicMock()
+        proxy._handler.read_parameter.return_value = ("123456", "ModBusHandler", "NO_ERR")
+        value, source, code = await proxy.read_param_live(96)
+        proxy._handler.read_parameter.assert_called_once_with(["96"])
+        self.assertEqual((value, source, code), ("123456", "ModBusHandler", "NO_ERR"))
+
+
 if __name__ == "__main__":
     unittest.main()
