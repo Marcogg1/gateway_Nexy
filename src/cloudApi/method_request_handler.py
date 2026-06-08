@@ -215,7 +215,7 @@ class MethodRequestHandler:
             return self._arg_error()
         items: list = []
         any_err = False
-        for pid in ids:
+        for pid in ids:  # pylint: disable=not-an-iterable
             value, code = self._proxy.get_param_value(pid)
             item: dict = {"p": str(pid), "v": str(value)}
             if code != LpCode.NO_ERR:

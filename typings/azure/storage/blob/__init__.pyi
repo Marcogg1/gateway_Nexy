@@ -1,8 +1,13 @@
+class BlobProperties:
+    size: int | None
+
+
 class BlobClient:
     @classmethod
     def from_blob_url(cls, blob_url: str) -> "BlobClient": ...
     def upload_blob(self, data: bytes, overwrite: bool = ...) -> None: ...
     def download_blob(self) -> "StorageStreamDownloader": ...
+    def get_blob_properties(self, **kwargs: object) -> BlobProperties: ...
 
 
 class StorageStreamDownloader:

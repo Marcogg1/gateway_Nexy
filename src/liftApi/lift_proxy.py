@@ -6,7 +6,7 @@ All lift access (cloud, WiFi, BT) goes through this proxy.
 
 import asyncio
 import time
-from typing import Any
+from typing import Any, cast
 
 from cloudApi.device_twin_desired_handler import DeviceTwinDesiredHandler
 from cloudApi.device_twin_reported import DeviceTwinReporter
@@ -168,9 +168,10 @@ class LiftProxy:
         if self._lift_type == LiftType.AHL:
             return await self.read_param_live(AHL_AR_PARAM)
         if self._lift_type == LiftType.ONE_K and self._handler is not None:
+            rs232 = cast(Rs232Handler, self._handler)
             async with self._handler_lock:
                 value, source, code = await asyncio.to_thread(
-                    self._handler.get_generic_text, "liftRef1"
+                    rs232.get_generic_text, "liftRef1"
                 )
             if code == Rs232Code.NO_ERR.name and isinstance(value, list) and value:
                 return value[0], source, code
@@ -193,9 +194,10 @@ class LiftProxy:
         if self._lift_type == LiftType.AHL:
             return None, LpCode.SOURCE.value, LpCode.PARAM_READ_ONLY.name
         if self._lift_type == LiftType.ONE_K and self._handler is not None:
+            rs232 = cast(Rs232Handler, self._handler)
             async with self._handler_lock:
                 return await asyncio.to_thread(
-                    self._handler.write_generic_text, ["liftRef1", value]
+                    rs232.write_generic_text, ["liftRef1", value]
                 )
         return None, LpCode.SOURCE.value, LpCode.INIT_ERR.name
 

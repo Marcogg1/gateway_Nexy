@@ -122,7 +122,11 @@ class TestMethodRequestHandler(unittest.IsolatedAsyncioTestCase):
         response = MagicMock()
         mock_method_response.create_from_method_request.return_value = response
 
-        handler = MethodRequestHandler(device_client)
+        proxy = MagicMock()
+        reporter = MagicMock()
+        desired = MagicMock()
+        desired.desired_properties = {}
+        handler = MethodRequestHandler(device_client, proxy, reporter, desired)
         with self.assertRaises(asyncio.CancelledError):
             await handler.listen_for_method()
 
