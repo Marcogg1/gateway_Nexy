@@ -202,3 +202,49 @@ class TestWriteDdms(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["d"][0]["ec"], "LINK_ERR")
         self.assertEqual(payload["es"], "ModBusHandler")
         proxy.push_param_event.assert_not_awaited()
+
+
+@patch("cloudApi.method_request_handler._now", return_value=FIXED_TS)
+class TestArNumberDdms(unittest.IsolatedAsyncioTestCase):
+    async def test_read_ar_number_success(self, _ts):
+        proxy = MagicMock()
+        proxy.read_ar_number = AsyncMock(return_value=("998877", "ModBusHandler", "NO_ERR"))
+        handler = make_handler(proxy=proxy)
+        status, payload = await run_one(handler, "la.read.ar-number", {})
+        self.assertEqual(payload, {"ts": FIXED_TS, "v": "998877"})
+
+    async def test_read_ar_number_error(self, _ts):
+        proxy = MagicMock()
+        proxy.read_ar_number = AsyncMock(return_value=(None, "LiftProxy", "INIT_ERR"))
+        handler = make_handler(proxy=proxy)
+        status, payload = await run_one(handler, "la.read.ar-number", {})
+        self.assertEqual(payload["es"], "LiftProxy")
+        self.assertEqual(payload["ec"], "INIT_ERR")
+
+    async def test_write_ar_number_success_reports_twin(self, _ts):
+        proxy = MagicMock()
+        proxy.write_ar_number = AsyncMock(return_value=("AR563412", "Rs232Handler", "NO_ERR"))
+        reporter = MagicMock()
+        reporter.report_property = AsyncMock()
+        handler = make_handler(proxy=proxy, reporter=reporter)
+        status, payload = await run_one(
+            handler, "la.write.ar-number", {"value": "AR563412"})
+        self.assertEqual(payload, {"ts": FIXED_TS, "w": "AR563412", "v": "AR563412", "s": "0"})
+        reporter.report_property.assert_awaited_once_with("la.arNumber", "AR563412")
+
+    async def test_write_ar_number_ahl_read_only(self, _ts):
+        proxy = MagicMock()
+        proxy.write_ar_number = AsyncMock(return_value=(None, "LiftProxy", "PARAM_READ_ONLY"))
+        reporter = MagicMock()
+        reporter.report_property = AsyncMock()
+        handler = make_handler(proxy=proxy, reporter=reporter)
+        status, payload = await run_one(
+            handler, "la.write.ar-number", {"value": "x"})
+        self.assertEqual(payload["ec"], "PARAM_READ_ONLY")
+        self.assertEqual(payload["es"], "LiftProxy")
+        reporter.report_property.assert_not_awaited()
+
+    async def test_write_ar_number_missing_field_400(self, _ts):
+        handler = make_handler()
+        status, payload = await run_one(handler, "la.write.ar-number", {})
+        self.assertEqual(status, 400)

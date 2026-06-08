@@ -189,10 +189,11 @@ class MethodRequestHandler:
         return {"result": True, "message": "gw.reboot method executed"}, 200
 
     async def _la_read_ar_number(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
-        """Return the lift article number."""
-        logger.debug(f"Payload: {payload}")
-        # TODO: send command and payload to correct handler
-        return {"result": True, "message": "la.read.ar-number method executed"}, 200
+        """Read the article (AR) number live from hardware."""
+        value, source, code = await self._proxy.read_ar_number()
+        if code == "NO_ERR":
+            return {"ts": _now(), "v": str(value)}, 200
+        return {"ts": _now(), "es": source, "ec": code}, 200
 
     async def _la_read_parameter(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
         """Read a single lift parameter from the cache."""
@@ -270,10 +271,15 @@ class MethodRequestHandler:
         return env, 200
 
     async def _la_write_ar_number(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
-        """Write the lift article number."""
-        logger.debug(f"Payload: {payload}")
-        # TODO: send command and payload to correct handler
-        return {"result": True, "message": "la.write.ar-number method executed"}, 200
+        """Write the article (AR) number; report identity to the twin on success."""
+        value = self._get_str(payload, "value")
+        if value is None:
+            return self._arg_error()
+        actual, source, code = await self._proxy.write_ar_number(value)
+        if code == "NO_ERR":
+            await self._reporter.report_property("la.arNumber", str(actual))
+            return {"ts": _now(), "w": value, "v": str(actual), "s": "0"}, 200
+        return {"ts": _now(), "w": value, "v": "-1", "s": "-1", "es": source, "ec": code}, 200
 
     async def _la_send_reboot_request(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
         """Send a reboot request to the lift application."""
