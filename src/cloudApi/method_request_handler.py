@@ -1,12 +1,29 @@
+import time
 from collections.abc import Awaitable, Callable
+
 from azure.iot.device import MethodResponse
+from azure.iot.device.aio import IoTHubDeviceClient
 from azure.iot.device.custom_typing import JSONSerializable
 
-_Handler = Callable[[JSONSerializable], Awaitable[tuple[JSONSerializable, int]]]
-from azure.iot.device.aio import IoTHubDeviceClient
+from config import Config
+from cloudApi.device_twin_desired_handler import DeviceTwinDesiredHandler
+from cloudApi.device_twin_reported import DeviceTwinReporter
+from cloudApi.file_download import download_file
+from lib.error_signals import LpCode, MrhCode
 from lib.logging_config import get_logger
+from liftApi.lift_identifier import LiftType
+from liftApi.lift_proxy import LiftProxy
 
 logger = get_logger(__name__)
+
+_Handler = Callable[[JSONSerializable], Awaitable[tuple[JSONSerializable, int]]]
+
+_LIFT_TYPE_CODE = {LiftType.UNKNOWN: "0", LiftType.AHL: "1", LiftType.ONE_K: "2"}
+
+
+def _now() -> int:
+    """Current unix timestamp as an int (patch-friendly seam for tests)."""
+    return int(time.time())
 
 
 class MethodRequestHandler:
@@ -17,14 +34,25 @@ class MethodRequestHandler:
     status code after each invocation.
     """
 
-    def __init__(self, device_client: IoTHubDeviceClient) -> None:
+    def __init__(
+        self,
+        device_client: IoTHubDeviceClient,
+        proxy: LiftProxy,
+        reporter: DeviceTwinReporter,
+        desired_handler: DeviceTwinDesiredHandler,
+    ) -> None:
         """Initialise the handler and build the method dispatch table.
 
         Args:
-            device_client: Authenticated IoT Hub device client used to receive
-                method requests and send responses.
+            device_client: Authenticated IoT Hub device client.
+            proxy: LiftProxy for all hardware access.
+            reporter: Twin reporter for identity properties (AR number).
+            desired_handler: Source of remote-tunable config (download cap).
         """
         self.device_client = device_client
+        self._proxy = proxy
+        self._reporter = reporter
+        self._desired_handler = desired_handler
         self._dispatch: dict[str, _Handler] = {
             "gw.read.hostname":            self._gw_read_hostname,
             "gw.read.hw-version":          self._gw_read_hw_version,
@@ -84,6 +112,32 @@ class MethodRequestHandler:
                     await self.device_client.send_method_response(error_response)
                 except Exception:
                     logger.exception("Failed to send error response for: %s", method_request.name)
+
+    # --- response/validation helpers ---
+
+    def _arg_error(self) -> tuple[JSONSerializable, int]:
+        """400 envelope for a malformed payload."""
+        return {"ts": _now(), "es": MrhCode.SOURCE.value, "ec": MrhCode.ARG_ERR.name}, 400
+
+    @staticmethod
+    def _get_str(payload: JSONSerializable, key: str) -> str | None:
+        """Return payload[key] as a string, or None if missing/not a dict."""
+        if not isinstance(payload, dict) or key not in payload:
+            return None
+        return str(payload[key])
+
+    def _download_max_bytes(self) -> int:
+        """Effective download size cap: twin desired property, else config default."""
+        default = Config.DOWNLOAD_MAX_BYTES_DEFAULT
+        try:
+            raw = self._desired_handler.desired_properties.get("downloadMaxBytes")
+            if raw is not None:
+                value = int(raw)
+                if value > 0:
+                    return value
+        except (TypeError, ValueError, AttributeError):
+            logger.debug("Invalid downloadMaxBytes in desired properties, using default")
+        return default
 
     async def _gw_read_hostname(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
         """Return the gateway hostname."""

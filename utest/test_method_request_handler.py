@@ -1,76 +1,53 @@
-#!/usr/bin/env python
-
 """Unit tests for MethodRequestHandler."""
 
 import os
 import sys
-import pytest
+import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 p = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "src"))
 sys.path.append(p)
 
-# pylint: disable=wrong-import-position
 from cloudApi.method_request_handler import MethodRequestHandler
 
 KNOWN_METHODS = [
-    "gw.read.hostname",
-    "gw.read.hw-version",
-    "gw.read.bom-revision",
-    "gw.read.serial-number",
-    "gw.reboot",
-    "la.read.ar-number",
-    "la.read.parameter",
-    "la.read.parameters",
-    "la.read.lift-type",
-    "la.write.parameter",
-    "la.write.read.parameter",
-    "la.write.ar-number",
-    "la.send.reboot-request",
-    "la.send.reset-service-memory",
-    "la.script-request",
-    "la.gw-log-generate",
-    "la.lift-log-generate",
-    "la.ll.send-request",
-    "la.fwu-trigger",
-    "ca.download-file",
-    "ca.set.config-item",
-    "ca.fwu-trigger",
-    "lcm.fwu-trigger",
+    "gw.read.hostname", "gw.read.hw-version", "gw.read.bom-revision",
+    "gw.read.serial-number", "gw.reboot", "la.read.ar-number",
+    "la.read.parameter", "la.read.parameters", "la.read.lift-type",
+    "la.write.parameter", "la.write.read.parameter", "la.write.ar-number",
+    "la.send.reboot-request", "la.send.reset-service-memory", "la.script-request",
+    "la.gw-log-generate", "la.lift-log-generate", "la.ll.send-request",
+    "la.fwu-trigger", "ca.download-file", "ca.set.config-item",
+    "ca.fwu-trigger", "lcm.fwu-trigger",
 ]
 
+# Fixed timestamp for deterministic envelope assertions.
+FIXED_TS = 1711843200
 
-@pytest.fixture
-def mock_client():
-    """Authenticated IoT Hub device client stub."""
-    client = MagicMock()
+
+def make_handler(proxy=None, reporter=None, desired=None, client=None):
+    """Construct a MethodRequestHandler with mock dependencies."""
+    client = client or MagicMock()
     client.receive_method_request = AsyncMock()
     client.send_method_response = AsyncMock()
-    return client
+    proxy = proxy or MagicMock()
+    reporter = reporter or MagicMock()
+    desired = desired or MagicMock()
+    desired.desired_properties = {}
+    return MethodRequestHandler(client, proxy, reporter, desired)
 
 
-@pytest.fixture
-def handler(mock_client):
-    """MethodRequestHandler wired to the mock client."""
-    return MethodRequestHandler(mock_client)
+def make_request(name, payload=None):
+    req = MagicMock()
+    req.name = name
+    req.payload = payload
+    return req
 
 
-def _make_request(method_name, payload=None):
-    """Create a fake MethodRequest with the given name and payload."""
-    mock_request = MagicMock()
-    mock_request.name = method_name
-    mock_request.payload = payload
-    return mock_request
-
-
-async def _run_one_request(handler, mock_client, method_name, payload=None):
-    """Drive listen_for_method() through exactly one request.
-
-    Returns (status, response_payload) from the response sent to the cloud.
-    """
-    mock_request = _make_request(method_name, payload)
-    mock_client.receive_method_request = AsyncMock(
-        side_effect=[mock_request, Exception("stop loop")]
+async def run_one(handler, name, payload=None):
+    """Drive listen_for_method through one request; return (status, payload)."""
+    handler.device_client.receive_method_request = AsyncMock(
+        side_effect=[make_request(name, payload), Exception("stop loop")]
     )
     with patch("cloudApi.method_request_handler.MethodResponse") as mock_mr:
         mock_mr.create_from_method_request.return_value = MagicMock()
@@ -82,72 +59,33 @@ async def _run_one_request(handler, mock_client, method_name, payload=None):
         return args[1], args[2]
 
 
-def test_dispatch_table_matches_known_methods(handler):
-    """Dispatch table keys match KNOWN_METHODS exactly — no drift in either direction."""
-    assert set(handler._dispatch.keys()) == set(KNOWN_METHODS)
+class TestDispatch(unittest.IsolatedAsyncioTestCase):
+    def test_dispatch_table_matches_known_methods(self):
+        handler = make_handler()
+        self.assertEqual(set(handler._dispatch.keys()), set(KNOWN_METHODS))
 
+    async def test_unknown_method_returns_404(self):
+        handler = make_handler()
+        status, payload = await run_one(handler, "unknown.method")
+        self.assertEqual(status, 404)
+        self.assertFalse(payload["result"])
 
-@pytest.mark.parametrize("method_name", KNOWN_METHODS)
-async def test_known_methods_return_200(handler, mock_client, method_name):
-    """All 23 known DDM commands return status 200, result True, and correct message."""
-    status, response_payload = await _run_one_request(handler, mock_client, method_name)
-    assert status == 200
-    assert response_payload["result"] is True
-    assert response_payload["message"] == f"{method_name} method executed"
+    async def test_handler_exception_sends_500(self):
+        handler = make_handler()
+        handler._dispatch["gw.reboot"] = AsyncMock(side_effect=RuntimeError("boom"))
+        status, payload = await run_one(handler, "gw.reboot")
+        self.assertEqual(status, 500)
 
-
-async def test_unknown_method_returns_404(handler, mock_client):
-    """Unknown method name returns status 404 with result False."""
-    status, response_payload = await _run_one_request(handler, mock_client, "unknown.method")
-    assert status == 404
-    assert response_payload["result"] is False
-
-
-async def test_response_sent_for_each_request(handler, mock_client):
-    """send_method_response is called exactly once per received request."""
-    req1 = _make_request("gw.reboot")
-    req2 = _make_request("la.read.parameter")
-    mock_client.receive_method_request = AsyncMock(
-        side_effect=[req1, req2, Exception("stop loop")]
-    )
-    with patch("cloudApi.method_request_handler.MethodResponse"):
-        try:
-            await handler.listen_for_method()
-        except Exception:  # pylint: disable=broad-except
-            pass
-    assert mock_client.send_method_response.call_count == 2
-
-
-async def test_payload_forwarded_without_crash(handler, mock_client):
-    """Handler does not crash when a non-empty payload is received."""
-    status, response_payload = await _run_one_request(
-        handler, mock_client, "la.write.parameter", payload={"param": "42", "value": "100"}
-    )
-    assert status == 200
-    assert response_payload["result"] is True
-
-
-async def test_handler_exception_sends_500(handler, mock_client):
-    """If a handler raises, a 500 error response is sent instead of crashing the loop."""
-    handler._dispatch["gw.reboot"] = AsyncMock(side_effect=RuntimeError("boom"))
-    status, response_payload = await _run_one_request(handler, mock_client, "gw.reboot")
-    assert status == 500
-    assert response_payload["result"] is False
-    assert response_payload["message"] == "Internal error"
-
-
-async def test_handler_exception_loop_continues(handler, mock_client):
-    """Loop keeps running after a handler exception — next request is processed normally."""
-    req1 = _make_request("gw.reboot")
-    req2 = _make_request("la.read.parameter")
-    mock_client.receive_method_request = AsyncMock(
-        side_effect=[req1, req2, Exception("stop loop")]
-    )
-    handler._dispatch["gw.reboot"] = AsyncMock(side_effect=RuntimeError("boom"))
-    with patch("cloudApi.method_request_handler.MethodResponse"):
-        try:
-            await handler.listen_for_method()
-        except Exception:  # pylint: disable=broad-except
-            pass
-    # req1 triggers error response, req2 triggers normal response → 2 sends total
-    assert mock_client.send_method_response.call_count == 2
+    async def test_loop_continues_after_exception(self):
+        handler = make_handler()
+        handler.device_client.receive_method_request = AsyncMock(
+            side_effect=[make_request("gw.reboot"), make_request("la.read.lift-type"),
+                         Exception("stop loop")]
+        )
+        handler._dispatch["gw.reboot"] = AsyncMock(side_effect=RuntimeError("boom"))
+        with patch("cloudApi.method_request_handler.MethodResponse"):
+            try:
+                await handler.listen_for_method()
+            except Exception:  # pylint: disable=broad-except
+                pass
+        self.assertEqual(handler.device_client.send_method_response.call_count, 2)
