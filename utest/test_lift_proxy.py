@@ -907,5 +907,33 @@ class TestWriteArNumber(LiftProxyTestBase):
         self.assertEqual((value, source, code), (None, "LiftProxy", "INIT_ERR"))
 
 
+class TestPushParamEvent(LiftProxyTestBase):
+    """Tests for DDM-write telemetry via push_param_event()."""
+
+    async def test_sends_event_with_ddm_source(self):
+        proxy = LiftProxy()
+        proxy._lib = MagicMock()
+        # get_param_value path: lib.get_param returns (value, code_name)
+        proxy._lib.get_param.return_value = (7, "NO_ERR")
+        proxy._event_sender = MagicMock()
+        proxy._event_sender.send_event = AsyncMock()
+
+        await proxy.push_param_event([1])
+
+        proxy._event_sender.send_event.assert_awaited_once()
+        payload = proxy._event_sender.send_event.await_args[0][0]
+        self.assertEqual(payload["source"], "la.parameter.ddm")
+        self.assertEqual(payload["event"], "la.parameters.update")
+        self.assertEqual(payload["data"][0]["parameter"], 1)
+        self.assertEqual(payload["data"][0]["value"], 7)
+
+    async def test_no_send_when_event_sender_missing(self):
+        proxy = LiftProxy()
+        proxy._lib = MagicMock()
+        proxy._event_sender = None
+        # Should not raise
+        await proxy.push_param_event([1])
+
+
 if __name__ == "__main__":
     unittest.main()

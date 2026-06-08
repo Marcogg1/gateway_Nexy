@@ -330,7 +330,7 @@ class LiftProxy:
             except Exception:
                 logger.exception("Daily poll cycle failed")
 
-    async def _send_params(self, param_ids: list[int]) -> None:
+    async def _send_params(self, param_ids: list[int], source: str = "la.parameter.polling") -> None:
         """Build and send a parameter update event from db values."""
         if self._event_sender is None or self._lib is None:
             logger.error("_send_params called before proxy is initialised")
@@ -346,9 +346,21 @@ class LiftProxy:
                 "data": data,
                 "error": "",
                 "event": "la.parameters.update",
-                "source": "la.parameter.polling",
+                "source": source,
             }
             await self._event_sender.send_event(payload)
+
+    async def push_param_event(self, param_ids: list[int]) -> None:
+        """Emit a la.parameters.update event for params changed via DDM write.
+
+        The poll loop suppresses DDM-initiated changes (write_param updates
+        the cache, so the next poll sees no diff). This pushes them explicitly
+        so the change enters telemetry history. Tagged with a DDM source.
+
+        Args:
+            param_ids: Parameter IDs that were just written.
+        """
+        await self._send_params(param_ids, source="la.parameter.ddm")
 
     def _get_param_push_list(self, list_type: str) -> list[int]:
         """Get param push list from desired properties, or lib defaults.
