@@ -34,8 +34,9 @@ def make_handler(proxy=None, reporter=None, desired=None, client=None):
     client.send_method_response = AsyncMock()
     proxy = proxy or MagicMock()
     reporter = reporter or MagicMock()
-    desired = desired or MagicMock()
-    desired.desired_properties = {}
+    if desired is None:
+        desired = MagicMock()
+        desired.desired_properties = {}
     return MethodRequestHandler(client, proxy, reporter, desired)
 
 
@@ -248,3 +249,42 @@ class TestArNumberDdms(unittest.IsolatedAsyncioTestCase):
         handler = make_handler()
         status, payload = await run_one(handler, "la.write.ar-number", {})
         self.assertEqual(status, 400)
+
+
+@patch("cloudApi.method_request_handler._now", return_value=FIXED_TS)
+class TestDownloadDdm(unittest.IsolatedAsyncioTestCase):
+    @patch("cloudApi.method_request_handler.download_file", new_callable=AsyncMock)
+    async def test_download_success(self, mock_dl, _ts):
+        mock_dl.return_value = ("leds.sh", "/data/downloads/script/leds.sh", "NO_ERR")
+        handler = make_handler()
+        status, payload = await run_one(
+            handler, "ca.download-file",
+            {"uri": "https://a.blob.core.windows.net/c/leds.sh", "type": "0x0B"})
+        self.assertEqual(status, 200)
+        self.assertEqual(payload, {
+            "ts": FIXED_TS, "fn": "leds.sh", "fp": "/data/downloads/script/leds.sh"})
+
+    @patch("cloudApi.method_request_handler.download_file", new_callable=AsyncMock)
+    async def test_download_error_maps_ec(self, mock_dl, _ts):
+        mock_dl.return_value = (None, None, "URL_ERR")
+        handler = make_handler()
+        status, payload = await run_one(
+            handler, "ca.download-file",
+            {"uri": "https://evil.example.com/x", "type": "0x0B"})
+        self.assertEqual(payload, {
+            "ts": FIXED_TS, "es": "MethodRequestHandler", "ec": "URL_ERR"})
+
+    async def test_download_missing_field_400(self, _ts):
+        handler = make_handler()
+        status, payload = await run_one(handler, "ca.download-file", {"type": "0x0B"})
+        self.assertEqual(status, 400)
+
+    @patch("cloudApi.method_request_handler.download_file", new_callable=AsyncMock)
+    async def test_download_uses_twin_max_bytes(self, mock_dl, _ts):
+        mock_dl.return_value = ("leds.sh", "/data/downloads/script/leds.sh", "NO_ERR")
+        desired = MagicMock()
+        desired.desired_properties = {"downloadMaxBytes": 1234}
+        handler = make_handler(desired=desired)
+        await run_one(handler, "ca.download-file",
+                      {"uri": "https://a.blob.core.windows.net/c/leds.sh", "type": "0x0B"})
+        self.assertEqual(mock_dl.await_args[0][2], 1234)

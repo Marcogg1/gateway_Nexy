@@ -324,10 +324,16 @@ class MethodRequestHandler:
         return {"result": True, "message": "la.fwu-trigger method executed"}, 200
 
     async def _ca_download_file(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
-        """Download a file to the cloud agent."""
-        logger.debug(f"Payload: {payload}")
-        # TODO: send command and payload to correct handler
-        return {"result": True, "message": "ca.download-file method executed"}, 200
+        """Download a file to a persistent, type-mapped folder (security-checked)."""
+        uri = self._get_str(payload, "uri")
+        type_code = self._get_str(payload, "type")
+        if uri is None or type_code is None:
+            return self._arg_error()
+        filename, fullpath, code = await download_file(
+            uri, type_code, self._download_max_bytes())
+        if code == MrhCode.NO_ERR.name:
+            return {"ts": _now(), "fn": filename, "fp": fullpath}, 200
+        return {"ts": _now(), "es": MrhCode.SOURCE.value, "ec": code}, 200
 
     async def _ca_set_config_item(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
         """Set a configuration item on the cloud agent."""
