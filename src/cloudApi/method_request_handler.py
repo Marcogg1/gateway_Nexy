@@ -139,6 +139,25 @@ class MethodRequestHandler:
             logger.debug("Invalid downloadMaxBytes in desired properties, using default")
         return default
 
+    @staticmethod
+    def _collect_param_ids(payload: JSONSerializable) -> list[int] | None:
+        """Build the param-id list from a parameters[] array and/or from/to range.
+
+        Returns None if the payload is not a dict or yields no ids.
+        """
+        if not isinstance(payload, dict):
+            return None
+        ids: list[int] = []
+        try:
+            for p in payload.get("parameters", []) or []:
+                ids.append(int(p))
+            if "from" in payload and "to" in payload:
+                for p in range(int(payload["from"]), int(payload["to"]) + 1):
+                    ids.append(p)
+        except (TypeError, ValueError):
+            return None
+        return ids or None
+
     async def _gw_read_hostname(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
         """Return the gateway hostname."""
         logger.debug(f"Payload: {payload}")
@@ -176,22 +195,41 @@ class MethodRequestHandler:
         return {"result": True, "message": "la.read.ar-number method executed"}, 200
 
     async def _la_read_parameter(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
-        """Read a single lift parameter by index."""
-        logger.debug(f"Payload: {payload}")
-        # TODO: send command and payload to correct handler
-        return {"result": True, "message": "la.read.parameter method executed"}, 200
+        """Read a single lift parameter from the cache."""
+        param = self._get_str(payload, "parameter")
+        if param is None:
+            return self._arg_error()
+        value, code = self._proxy.get_param_value(int(param))
+        item: dict = {"p": param, "v": str(value)}
+        env: dict = {"ts": _now(), "d": [item]}
+        if code != LpCode.NO_ERR:
+            item["ec"] = code.name
+            env["es"] = LpCode.SOURCE.value
+        return env, 200
 
     async def _la_read_parameters(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
-        """Read multiple lift parameters in one request."""
-        logger.debug(f"Payload: {payload}")
-        # TODO: send command and payload to correct handler
-        return {"result": True, "message": "la.read.parameters method executed"}, 200
+        """Read multiple lift parameters from the cache in one request."""
+        ids = self._collect_param_ids(payload)
+        if ids is None:
+            return self._arg_error()
+        items: list = []
+        any_err = False
+        for pid in ids:
+            value, code = self._proxy.get_param_value(pid)
+            item: dict = {"p": str(pid), "v": str(value)}
+            if code != LpCode.NO_ERR:
+                item["ec"] = code.name
+                any_err = True
+            items.append(item)
+        env: dict = {"ts": _now(), "d": items}
+        if any_err:
+            env["es"] = LpCode.SOURCE.value
+        return env, 200
 
     async def _la_read_lift_type(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
-        """Return the lift type identifier."""
-        logger.debug(f"Payload: {payload}")
-        # TODO: send command and payload to correct handler
-        return {"result": True, "message": "la.read.lift-type method executed"}, 200
+        """Return the identified lift type as a compact code (0/1/2)."""
+        lt = _LIFT_TYPE_CODE.get(self._proxy.lift_type, "0")
+        return {"ts": _now(), "lt": lt}, 200
 
     async def _la_write_parameter(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
         """Write a single lift parameter."""

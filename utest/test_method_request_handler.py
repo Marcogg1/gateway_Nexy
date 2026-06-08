@@ -9,6 +9,8 @@ p = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "src
 sys.path.append(p)
 
 from cloudApi.method_request_handler import MethodRequestHandler
+from lib.error_signals import LpCode
+from liftApi.lift_identifier import LiftType
 
 KNOWN_METHODS = [
     "gw.read.hostname", "gw.read.hw-version", "gw.read.bom-revision",
@@ -89,3 +91,61 @@ class TestDispatch(unittest.IsolatedAsyncioTestCase):
             except Exception:  # pylint: disable=broad-except
                 pass
         self.assertEqual(handler.device_client.send_method_response.call_count, 2)
+
+
+@patch("cloudApi.method_request_handler._now", return_value=FIXED_TS)
+class TestReadDdms(unittest.IsolatedAsyncioTestCase):
+    async def test_read_parameter_success(self, _ts):
+        proxy = MagicMock()
+        proxy.get_param_value.return_value = (125, LpCode.NO_ERR)
+        handler = make_handler(proxy=proxy)
+        status, payload = await run_one(handler, "la.read.parameter", {"parameter": "121"})
+        self.assertEqual(status, 200)
+        self.assertEqual(payload, {"ts": FIXED_TS, "d": [{"p": "121", "v": "125"}]})
+
+    async def test_read_parameter_error_adds_ec_and_es(self, _ts):
+        proxy = MagicMock()
+        proxy.get_param_value.return_value = (-1, LpCode.PARAM_NOT_IN_DB)
+        handler = make_handler(proxy=proxy)
+        status, payload = await run_one(handler, "la.read.parameter", {"parameter": "550"})
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["es"], "LiftProxy")
+        self.assertEqual(payload["d"][0]["ec"], "PARAM_NOT_IN_DB")
+
+    async def test_read_parameter_missing_field_400(self, _ts):
+        handler = make_handler()
+        status, payload = await run_one(handler, "la.read.parameter", {})
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["ec"], "ARG_ERR")
+
+    async def test_read_parameters_mixed(self, _ts):
+        proxy = MagicMock()
+        proxy.get_param_value.side_effect = [(125, LpCode.NO_ERR), (-1, LpCode.PARAM_NOT_IN_DB)]
+        handler = make_handler(proxy=proxy)
+        status, payload = await run_one(
+            handler, "la.read.parameters", {"parameters": ["121", "550"]})
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["d"][0], {"p": "121", "v": "125"})
+        self.assertEqual(payload["d"][1]["ec"], "PARAM_NOT_IN_DB")
+        self.assertEqual(payload["es"], "LiftProxy")
+
+    async def test_read_parameters_from_to_range(self, _ts):
+        proxy = MagicMock()
+        proxy.get_param_value.return_value = (1, LpCode.NO_ERR)
+        handler = make_handler(proxy=proxy)
+        status, payload = await run_one(
+            handler, "la.read.parameters", {"from": 5, "to": 6})
+        self.assertEqual([i["p"] for i in payload["d"]], ["5", "6"])
+
+    async def test_read_parameters_bad_payload_400(self, _ts):
+        handler = make_handler()
+        status, payload = await run_one(handler, "la.read.parameters", {})
+        self.assertEqual(status, 400)
+
+    async def test_read_lift_type(self, _ts):
+        proxy = MagicMock()
+        proxy.lift_type = LiftType.ONE_K
+        handler = make_handler(proxy=proxy)
+        status, payload = await run_one(handler, "la.read.lift-type", {})
+        self.assertEqual(status, 200)
+        self.assertEqual(payload, {"ts": FIXED_TS, "lt": "2"})
