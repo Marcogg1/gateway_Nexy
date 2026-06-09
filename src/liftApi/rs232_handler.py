@@ -33,7 +33,7 @@ class Rs232Handler:
         self.name: str = self.rs232Codes.SOURCE.value
         self.logger = logger
         self.dh = DiskHandler()
-        self.rs_port: str = "/dev/ttymxc1"
+        self.rs_port: str = "/dev/ttyLP6"
         self.data_sep: str = 'x'
         self.serial_timeout: float = 0.5
         self.polled_file_package: int = 0
