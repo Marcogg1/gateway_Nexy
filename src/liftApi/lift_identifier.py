@@ -66,7 +66,7 @@ async def identify_lift(modbus_handler, rs232_handler) -> LiftType:
                 return LiftType.ONE_K
             logger.info("RS232 probe failed with %s", err)
         except Exception as e:
-            logger.warning("RS232 probe raised exception: %s", e)
+            logger.warning("RS232 probe raised exception: %s", e, exc_info=True)
     else:
         logger.info("No RS232Handler provided, skipping 1k probe")
 
