@@ -1,6 +1,5 @@
 pymodbus
 pyserial
-gpiod>=2.0
 azure-iot-device
 azure-storage-blob
 pyyaml
