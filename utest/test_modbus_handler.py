@@ -88,6 +88,15 @@ class TestModBusHandler(unittest.TestCase):
         assert result is False
         assert self.handler._modbus_link is False
 
+    def test_setup_connection_connects_when_port_present(self) -> None:
+        """_modbus_link is True and connect() is called when the tty exists."""
+        with patch("liftApi.modbus_handler.os.path.exists", return_value=True), \
+             patch("liftApi.modbus_handler.ModbusSerialClient") as mock_client, \
+             patch("filemgmt.disk_handler.DiskHandler"):
+            handler = ModBusHandler()
+        assert handler._modbus_link is True
+        mock_client.return_value.connect.assert_called_once()
+
     # ---- Input Validation Tests ----
 
     def test_validate_inputs_valid(self) -> None:

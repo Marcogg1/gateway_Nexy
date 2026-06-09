@@ -193,7 +193,8 @@ class ModBusHandler:
             retries=0,
             handle_local_echo=False,
         )
-        self.client.connect()
+        if self._modbus_link:
+            self.client.connect()
 
     def _test_connection(self) -> bool:
         """Test if onboard RS485 device exists.
