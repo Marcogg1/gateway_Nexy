@@ -1,4 +1,5 @@
 {
+  "typeCheckingMode": "standard",
   "stubPath": "typings",
   "extraPaths": ["src", "vendor/nexyhub-ble-sdk"],
   "exclude": ["vendor/", ".venv", "**/__pycache__"]
