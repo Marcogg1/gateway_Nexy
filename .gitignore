@@ -145,3 +145,6 @@ docs/superpowers/
 
 # Built docker image archives
 *.tar
+
+# iot-test harness local results
+tests/iot-test/results*.json
