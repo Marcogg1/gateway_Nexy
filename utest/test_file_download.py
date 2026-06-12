@@ -23,6 +23,12 @@ class TestDownloadFile(unittest.IsolatedAsyncioTestCase):
         fn, fp, code = await file_download.download_file(BAD_HOST_URI, "0x0B", 1000)
         self.assertEqual(code, "URL_ERR")
 
+    async def test_non_https_scheme_rejected(self):
+        """An allowlisted host over http:// (or file://) must be rejected."""
+        uri = "http://acct.blob.core.windows.net/c/leds.sh?sig=abc"
+        fn, fp, code = await file_download.download_file(uri, "0x0B", 1000)
+        self.assertEqual((fn, fp, code), (None, None, "URL_ERR"))
+
     async def test_traversal_filename_rejected(self):
         uri = "https://acct.blob.core.windows.net/c/..%2f..%2fetc%2fpasswd"
         fn, fp, code = await file_download.download_file(uri, "0x0B", 1000)

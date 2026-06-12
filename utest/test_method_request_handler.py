@@ -170,6 +170,17 @@ class TestReadDdms(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(payload["ec"], "ARG_ERR")
         proxy.get_param_value.assert_not_called()
 
+    async def test_read_parameters_oversized_list_400(self, _ts):
+        """A parameters[] array beyond the cap is rejected before int() loop."""
+        proxy = MagicMock()
+        handler = make_handler(proxy=proxy)
+        big = [str(i) for i in range(2000)]
+        status, payload = await run_one(
+            handler, "la.read.parameters", {"parameters": big})
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["ec"], "ARG_ERR")
+        proxy.get_param_value.assert_not_called()
+
     async def test_read_lift_type(self, _ts):
         proxy = MagicMock()
         proxy.lift_type = LiftType.ONE_K

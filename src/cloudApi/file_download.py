@@ -61,7 +61,13 @@ async def download_file(
         logger.warning("Unknown download type: %s", type_code)
         return None, None, MrhCode.TYPE_ERR.name
 
-    host = urlparse(uri).hostname or ""
+    parsed = urlparse(uri)
+    # Require TLS: a hostname match alone would also admit http:// (downgrade)
+    # or file:// (local read) since both can carry an allowlisted host.
+    if parsed.scheme != "https":
+        logger.warning("Download scheme not allowed: %s", parsed.scheme)
+        return None, None, MrhCode.URL_ERR.name
+    host = parsed.hostname or ""
     if not _host_allowed(host):
         logger.warning("Download host not allowed: %s", host)
         return None, None, MrhCode.URL_ERR.name

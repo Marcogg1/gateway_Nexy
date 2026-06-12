@@ -2,10 +2,25 @@
 
 import logging
 import os
+import re
+from urllib.parse import urlparse, urlunparse
 
 from azure.storage.blob import BlobClient
 
 logger = logging.getLogger(__name__)
+
+# Mask the SAS signature wherever it appears in free text (e.g. SDK
+# exception messages that embed the full request URL).
+_SAS_SIG_RE = re.compile(r"(sig=)[^&\s]+", re.IGNORECASE)
+
+
+def _redact_sas(text: str) -> str:
+    """Strip the query string from a blob URL and mask any sig= token."""
+    try:
+        text = urlunparse(urlparse(text)._replace(query=""))
+    except ValueError:
+        pass
+    return _SAS_SIG_RE.sub(r"\1***", text)
 
 
 async def download_from_blob(blob_url: str, destination_path: str) -> None:
@@ -46,7 +61,10 @@ async def download_from_blob(blob_url: str, destination_path: str) -> None:
         logger.info(f"Downloaded {len(data)} bytes to {destination_path}")
 
     except Exception as e:
-        logger.error(f"Blob download failed: {e}")
+        # Azure SDK errors often embed the full request URL incl. the SAS
+        # signature; scrub before logging so credentials don't reach logs.
+        logger.error("Blob download failed for %s: %s",
+                     _redact_sas(blob_url), _redact_sas(str(e)))
 
         # Clean up .tmp file on failure
         try:

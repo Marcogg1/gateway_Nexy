@@ -176,7 +176,9 @@ class MethodRequestHandler:
             params = payload.get("parameters", [])
             if params is not None:
                 # A bare string would iterate per-character; require a list.
-                if not isinstance(params, list):
+                # Cap before the int() loop so a huge array can't allocate/
+                # iterate unboundedly on the event loop.
+                if not isinstance(params, list) or len(params) > MethodRequestHandler.MAX_PARAM_IDS:
                     return None
                 for p in params:
                     ids.append(int(p))
