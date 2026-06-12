@@ -454,11 +454,30 @@ class TestAhlPollParams(unittest.TestCase):
         self.assertIn(1, result)
 
     @async_test
-    async def test_force_read_all_skips_bitmask_read(self):
-        """force_read_all=True must not call handler.read_parameter(['2'])."""
+    async def test_force_read_all_acks_bitmask_first(self):
+        """force_read_all=True reads param 2 FIRST (ack/clear LCM flags), discards value."""
+        reads: list[str] = []
+
+        def fake_read(args):
+            reads.append(args[0])
+            if args == ["2"]:
+                # Power-on state: LCM reports all groups dirty. Value must be ignored.
+                return (0x7FFFFFFF, "ModBusHandler", MbCode.NO_ERR.name)
+            return (7, "ModBusHandler", MbCode.NO_ERR.name)
+
+        self.handler.read_parameter.side_effect = fake_read
+        result = await self.ahl.poll_params(self.handler, force_read_all=True)
+        self.assertEqual(reads[0], "2")
+        self.assertEqual(reads.count("2"), 1)
+        self.assertIn(0, result)
+        self.assertIn(15, result)
+
+    @async_test
+    async def test_force_read_all_survives_ack_failure(self):
+        """A failed param-2 ack read must not abort the forced full sweep."""
         def fake_read(args):
             if args == ["2"]:
-                raise AssertionError("Bitmask param 2 should not be read")
+                return (-1, "ModBusHandler", MbCode.COM_ERR.name)
             return (7, "ModBusHandler", MbCode.NO_ERR.name)
 
         self.handler.read_parameter.side_effect = fake_read
@@ -477,7 +496,7 @@ class TestAhlPollParams(unittest.TestCase):
 
         self.handler.read_parameter.side_effect = fake_read
         await self.ahl.poll_params(self.handler, force_read_all=True)
-        self.assertNotIn("2", reads)
+        self.assertEqual(reads[0], "2")
         for pid in (0, 16, 32, 48, 64, 80, 94, 110, 126):
             self.assertIn(str(pid), reads, f"Param {pid} not read")
 
@@ -493,7 +512,7 @@ class TestAhlPollParams(unittest.TestCase):
 
         self.handler.read_parameter.side_effect = fake_read
         await self.ahl.poll_params(self.handler, force_read_all=True)
-        self.assertNotIn("2", reads)
+        self.assertEqual(reads[0], "2")
         for pid in (127, 128, 129, 340, 344, 345):
             self.assertIn(str(pid), reads, f"Param {pid} not read")
 

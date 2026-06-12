@@ -166,6 +166,16 @@ class AhlLib:
             List of parameter IDs whose values actually changed.
         """
         if force_read_all:
+            # Ack-read PARAM_POLLING before the sweep: reading it clears the
+            # LCM's power-on change flags, which would otherwise mark every
+            # group dirty and trigger a redundant full re-read on the next
+            # normal cycle. The value is discarded — the forced sweep reads
+            # everything anyway, and changes during the sweep re-set flags.
+            _, _, ack_code = await asyncio.to_thread(
+                handler.read_parameter, ["2"]
+            )
+            if ack_code != MbCode.NO_ERR.name:
+                self.logger.warning("PARAM_POLLING ack read failed: %s", ack_code)
             bitmask = 0x7FFFFFFF
         else:
             # Read the change-flags bitmask (param 2)
