@@ -140,6 +140,8 @@ MALFORMED_CASES: list[tuple[str, dict]] = [
     ("la.read.parameter", {"parameter": "abc"}),  # the 2473acf regression
     ("la.read.parameters", {}),
     ("la.read.parameters", {"from": 5, "to": 3}),  # empty range -> no ids
+    ("la.read.parameters", {"parameters": "12"}),  # scalar string, not a list
+    ("la.read.parameters", {"from": 0, "to": 2000000000}),  # oversized range
     ("la.write.parameter", {"parameter": 1}),  # missing value
     ("la.write.parameter", {"parameter": "abc", "value": "1"}),
     ("la.write.read.parameter", {}),
