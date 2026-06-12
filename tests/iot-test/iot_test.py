@@ -33,9 +33,11 @@ class Result:
 class Runner:
     args: argparse.Namespace
     results: list[Result] = field(default_factory=list)
-    # (param, original value) pairs still needing restore at end of an
-    # --auto run (telemetry re-write + any failed in-cycle restore).
-    pending_restore: list[tuple[int, str]] = field(default_factory=list)
+    # pid -> original value, for restore at the end of an --auto run
+    # (telemetry re-write + any failed in-cycle restore). Keyed by pid so the
+    # first-captured original wins if both auto_select and the write cycle
+    # touch the same param; an in-cycle restore pops its own entry.
+    pending_restore: dict[int, str] = field(default_factory=dict)
 
     # -- plumbing ---------------------------------------------------------
 
@@ -126,7 +128,7 @@ class Runner:
                 target = next((v for v in values if v != current), None)
                 if current is None or target is None:
                     continue
-                self.pending_restore.append((pid, current))
+                self.pending_restore.setdefault(pid, current)
                 self.args.write_param, self.args.write_value = pid, target
                 print(f"Auto: write param {pid} ({name}): {current} -> {target}, restore after")
                 break
@@ -137,7 +139,7 @@ class Runner:
 
     def auto_restore(self) -> None:
         """Write original values back after an --auto run."""
-        for pid, original in dict(self.pending_restore).items():
+        for pid, original in list(self.pending_restore.items()):
             try:
                 status, body = self.invoke("la.write.parameter",
                                            {"parameter": pid, "value": original})
@@ -194,7 +196,7 @@ class Runner:
                         "" if ok else f"item={json.dumps(it)} {envelope.error_of(body or {})}")
             if not ok:
                 continue
-            self.pending_restore.append((pid, current))
+            self.pending_restore.setdefault(pid, current)
 
             status, body = self.invoke("la.read.parameter", {"parameter": pid})
             got = envelope.value_of(body or {}, p)
@@ -210,7 +212,7 @@ class Runner:
             self.record("write_readback", f"{name}({p}):write.read-restore", ok,
                         "" if ok else f"item={json.dumps(it)} {envelope.error_of(body or {})}")
             if ok:
-                self.pending_restore.remove((pid, current))
+                self.pending_restore.pop(pid, None)
 
     # -- groups (implemented in later tasks) -------------------------------
 
