@@ -156,22 +156,40 @@ class MethodRequestHandler:
             logger.debug("Invalid downloadMaxBytes in desired properties, using default")
         return default
 
+    # Upper bound on ids a single la.read.parameters may request. Real lift
+    # param ids number in the low hundreds; this caps a malformed/hostile
+    # from/to range (e.g. 0..2_000_000_000) before it allocates a huge list
+    # or stalls the event loop in the per-id read loop.
+    MAX_PARAM_IDS = 1024
+
     @staticmethod
     def _collect_param_ids(payload: JSONSerializable) -> list[int] | None:
         """Build the param-id list from a parameters[] array and/or from/to range.
 
-        Returns None if the payload is not a dict or yields no ids.
+        Returns None if the payload is not a dict, the parameters value is not
+        a list, the range is malformed, or the request exceeds MAX_PARAM_IDS.
         """
         if not isinstance(payload, dict):
             return None
         ids: list[int] = []
         try:
-            for p in payload.get("parameters", []) or []:
-                ids.append(int(p))
+            params = payload.get("parameters", [])
+            if params is not None:
+                # A bare string would iterate per-character; require a list.
+                if not isinstance(params, list):
+                    return None
+                for p in params:
+                    ids.append(int(p))
             if "from" in payload and "to" in payload:
-                for p in range(int(payload["from"]), int(payload["to"]) + 1):
-                    ids.append(p)
+                lo, hi = int(payload["from"]), int(payload["to"])
+                # Bound the span BEFORE building the range so a hostile
+                # from/to can't allocate/iterate billions of ints.
+                if len(ids) + max(0, hi - lo + 1) > MethodRequestHandler.MAX_PARAM_IDS:
+                    return None
+                ids.extend(range(lo, hi + 1))
         except (TypeError, ValueError):
+            return None
+        if len(ids) > MethodRequestHandler.MAX_PARAM_IDS:
             return None
         return ids or None
 

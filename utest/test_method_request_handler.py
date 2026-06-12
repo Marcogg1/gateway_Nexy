@@ -150,6 +150,26 @@ class TestReadDdms(unittest.IsolatedAsyncioTestCase):
         status, payload = await run_one(handler, "la.read.parameters", {})
         self.assertEqual(status, 400)
 
+    async def test_read_parameters_scalar_string_400(self, _ts):
+        """A scalar 'parameters' string must not iterate per-character."""
+        proxy = MagicMock()
+        handler = make_handler(proxy=proxy)
+        status, payload = await run_one(
+            handler, "la.read.parameters", {"parameters": "12"})
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["ec"], "ARG_ERR")
+        proxy.get_param_value.assert_not_called()
+
+    async def test_read_parameters_oversized_range_400(self, _ts):
+        """A huge from/to range is rejected before allocating/looping it."""
+        proxy = MagicMock()
+        handler = make_handler(proxy=proxy)
+        status, payload = await run_one(
+            handler, "la.read.parameters", {"from": 0, "to": 2_000_000_000})
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["ec"], "ARG_ERR")
+        proxy.get_param_value.assert_not_called()
+
     async def test_read_lift_type(self, _ts):
         proxy = MagicMock()
         proxy.lift_type = LiftType.ONE_K
