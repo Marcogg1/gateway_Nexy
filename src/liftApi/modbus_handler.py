@@ -674,28 +674,13 @@ class ModBusHandler:
             logger.error("Modbus communication error")
             return -1, self.name, MbCode.COM_ERR.name
 
-        # From code documentation `register_write_message.py`
-        # "The normal response returns the function code, starting address,
-        # and quantity of registers written."
-        response = str(response)
-
-        if "WriteMultipleRegisterResponse" not in response:
-            logger.error(
-                "Keyword missing. Response could not be decoded"
-            )
-            return -1, self.name, MbCode.COM_ERR.name
-
-        try:
-            rec_param = str(response).split("(")[1].split(",")[0]
-            rec_count = str(response).split(")", maxsplit=1)[0].split(",")[1]
-        except Exception:  # pylint: disable=broad-exception-caught
-            logger.error("Parsing return values failed")
-            return -1, self.name, MbCode.COM_ERR.name
-
+        # A WriteMultipleRegisters ack echoes the starting address and the
+        # quantity of registers written. Check the PDU attributes directly;
+        # parsing str(response) broke when pymodbus 3 renamed the class and
+        # changed the repr format.
         if (
-            str(param)
-            != str(self._convert_param_addr(rec_param, direction="rec"))
-            or rec_count != "2"
+            getattr(response, "address", None) != self._convert_param_addr(param)
+            or getattr(response, "count", None) != 2
         ):
             logger.error("Response could not be decoded")
             return -1, self.name, MbCode.COM_ERR.name
