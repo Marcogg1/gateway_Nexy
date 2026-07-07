@@ -41,6 +41,14 @@ def monkey_patch_recv(*args):
     return m_socket_response
 
 
+class _SeqInt:
+    """Descriptor returning successive ints on each attribute access, matching pyserial's in_waiting property."""
+    def __init__(self, values):
+        self._it = iter(values)
+    def __get__(self, obj, objtype=None):
+        return next(self._it, 0)
+
+
 class Serial:
     """
     Mock class for both serial and socket
@@ -846,7 +854,7 @@ class TestRs232Handler:
         # -----------------------------------
         exp_serial = b'{"cmd": "operation", "type": 130, "data": [4, 5, 6, 7]}'
         self.patch_serial(exp_serial, monkeypatch)
-        self.rs.client.in_waiting = mock.MagicMock(side_effect=[len(exp_serial), len(exp_serial), 0, 0])
+        self.rs.client.in_waiting = _SeqInt([len(exp_serial), len(exp_serial), 0, 0])
 
         status, err_code = self.rs.read_serial()
 
@@ -862,7 +870,7 @@ class TestRs232Handler:
         exp_serial = b'{"cmd": "operation", "type": 130, "data": [4, 5, 6, 7]}'
         exp_serial += b'{"cmd": "operation", "type": 130, "data": [4, 5, 6, 8]}'
         self.patch_serial(exp_serial, monkeypatch)
-        self.rs.client.in_waiting = mock.MagicMock(side_effect=[len(exp_serial), len(exp_serial), 0, 0])
+        self.rs.client.in_waiting = _SeqInt([len(exp_serial), len(exp_serial), 0, 0])
 
         status, err_code = self.rs.read_serial()
 
@@ -881,14 +889,7 @@ class TestRs232Handler:
 
         self.patch_serial(exp_serial_first, monkeypatch)
         self.rs.client.read = mock.MagicMock(side_effect=[exp_serial_first, exp_serial_second])
-        self.rs.client.in_waiting = mock.MagicMock(side_effect=[1,  # > 0
-                                                               1,  # > 0
-                                                               len(exp_serial_first),
-                                                               0,
-                                                               # if not rsp_full.endswith('}') and self.client.in_waiting() == 0:
-                                                               1,  # > 0
-                                                               len(exp_serial_second),
-                                                               0])
+        self.rs.client.in_waiting = _SeqInt([1, 1, len(exp_serial_first), 0, 1, len(exp_serial_second), 0])
 
         status, err_code = self.rs.read_serial()
         assert isinstance(status, str)
@@ -905,7 +906,7 @@ class TestRs232Handler:
         exp_rsp_full = -1
 
         self.rs._Rs232Handler__serial_available = mock.MagicMock(return_value=True)
-        self.rs.client.in_waiting = mock.MagicMock(side_effect=[0, 0, 0, 0, 0])
+        self.rs.client.in_waiting = _SeqInt([0, 0, 0, 0, 0])
 
         rsp_full, err_code = self.rs.read_serial()
         assert exp_rsp_full == rsp_full
@@ -922,12 +923,11 @@ class TestRs232Handler:
 
         exp_rsp = b'{"cmd": "liftRef1", "data": "AR123456"}'
 
-        # Don't use self.patch() function, since we want to set `in_waiting` as a MagicMock
         monkeypatch.setattr(self.rs.client, 'read', monkey_patch_read)
         m_serial_response = exp_rsp
 
         self.rs._Rs232Handler__serial_available = mock.MagicMock(return_value=True)
-        self.rs.client.in_waiting = mock.MagicMock(side_effect=[0, 0, len(exp_rsp), len(exp_rsp), 0, 0])
+        self.rs.client.in_waiting = _SeqInt([0, 0, len(exp_rsp), len(exp_rsp), 0, 0])
 
         rsp_full, err_code = self.rs.read_serial()
 
@@ -959,7 +959,7 @@ class TestRs232Handler:
         exp_rsp = -1
 
         self.rs._Rs232Handler__serial_available = mock.MagicMock(return_value=True)
-        self.rs.client.in_waiting = mock.MagicMock(side_effect=[0, 0, 1, 1, 0, 0])
+        self.rs.client.in_waiting = _SeqInt([0, 0, 1, 1, 0, 0])
 
         self.rs.client.read = mock.MagicMock(side_effect=[serial.SerialException])
 
@@ -977,7 +977,7 @@ class TestRs232Handler:
 
         exp_serial = b'{"cmd": "operation", "type": 130, "data": [4, 5, 6, 7]}\xf8'
         self.patch_serial(exp_serial, monkeypatch)
-        self.rs.client.in_waiting = mock.MagicMock(side_effect=[len(exp_serial), len(exp_serial), 0, 0])
+        self.rs.client.in_waiting = _SeqInt([len(exp_serial), len(exp_serial), 0, 0])
 
         status, err_code = self.rs.read_serial()
 
@@ -993,7 +993,7 @@ class TestRs232Handler:
 
         exp_serial = b'"cmd": "operation", "type": 130, "data": [4, 5, 6, 7]}{whole_response}'
         self.patch_serial(exp_serial, monkeypatch)
-        self.rs.client.in_waiting = mock.MagicMock(side_effect=[len(exp_serial), len(exp_serial), 0, 0])
+        self.rs.client.in_waiting = _SeqInt([len(exp_serial), len(exp_serial), 0, 0])
 
         status, err_code = self.rs.read_serial()
 
@@ -1011,7 +1011,7 @@ class TestRs232Handler:
         # Order matters
         exp_serial = exp_other + exp_status
         self.patch_serial(exp_serial, monkeypatch)
-        self.rs.client.in_waiting = mock.MagicMock(side_effect=[len(exp_serial), len(exp_serial), 0, 0])
+        self.rs.client.in_waiting = _SeqInt([len(exp_serial), len(exp_serial), 0, 0])
 
         response, err_code = self.rs.read_serial()
 
@@ -1064,7 +1064,7 @@ class TestRs232Handler:
         # Order matters
         exp_serial = exp_wanted + exp_status
         self.patch_serial(exp_serial, monkeypatch)
-        self.rs.client.in_waiting = mock.MagicMock(side_effect=[len(exp_serial), len(exp_serial), 0, 0])
+        self.rs.client.in_waiting = _SeqInt([len(exp_serial), len(exp_serial), 0, 0])
 
         response, err_code = self.rs.read_serial()
 
@@ -1107,7 +1107,7 @@ class TestRs232Handler:
         exp_serial = exp_wanted + exp_status + exp_other
 
         self.patch_serial(exp_serial, monkeypatch)
-        self.rs.client.in_waiting = mock.MagicMock(side_effect=[len(exp_serial), len(exp_serial), 0, 0])
+        self.rs.client.in_waiting = _SeqInt([len(exp_serial), len(exp_serial), 0, 0])
 
         response, err_code = self.rs.read_serial()
 
@@ -1347,7 +1347,7 @@ class TestRs232Handler:
         exp_serial = exp_wanted + exp_status + exp_other
 
         self.patch_serial(exp_serial, monkeypatch)
-        self.rs.client.in_waiting = mock.MagicMock(side_effect=[len(exp_serial), len(exp_serial), 0, 0])
+        self.rs.client.in_waiting = _SeqInt([len(exp_serial), len(exp_serial), 0, 0])
 
         status, wanted, other, err_code = self.rs.get_signal_from_serial_buffer('liftRef1')
 
@@ -1365,7 +1365,7 @@ class TestRs232Handler:
         exp_status = b'{"cmd": "operation", "type": 130, "data": [4, 5, 6, 7]}'
         exp_serial = exp_status
         self.patch_serial(exp_serial, monkeypatch)
-        self.rs.client.in_waiting = mock.MagicMock(side_effect=[len(exp_serial), len(exp_serial), 0, 0])
+        self.rs.client.in_waiting = _SeqInt([len(exp_serial), len(exp_serial), 0, 0])
         status, wanted, other, err_code = self.rs.get_signal_from_serial_buffer('operation', '130')
 
         assert len(status) == 1
