@@ -43,9 +43,24 @@ def monkey_patch_recv(*args):
 
 class _SeqInt:
     """Descriptor returning successive ints on each attribute access, matching pyserial's in_waiting property."""
-    def __init__(self, values):
+
+    def __init__(self, values: list[int]) -> None:
+        """Initializes the descriptor with the sequence of values to return.
+
+        Args:
+            values: Ints to return in order on successive attribute accesses.
+        """
         self._it = iter(values)
-    def __get__(self, obj, objtype=None):
+
+    def __get__(self, obj: object, objtype: type | None = None) -> int:
+        """Returns the next value in the sequence, or 0 once exhausted.
+
+        A default is required here (rather than raising StopIteration) because
+        `Serial` is patched as a class, not an instance, so this descriptor
+        persists as a class attribute across tests; monkeypatch.setattr()
+        reads the previous test's (already exhausted) instance internally
+        before installing a new one.
+        """
         return next(self._it, 0)
 
 
