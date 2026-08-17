@@ -1,3 +1,5 @@
+"""Monitor for IoT Hub connection-state changes and background exceptions."""
+
 from azure.iot.device.aio import IoTHubDeviceClient
 from lib.logging_config import get_logger
 
@@ -27,8 +29,12 @@ class ConnectionMonitor:
         Returns:
             None
         """
-        self.device_client.on_connection_state_change = self._on_connection_state_change  # type: ignore[attr-defined]
-        self.device_client.on_background_exception = self._on_background_exception  # type: ignore[attr-defined]
+        self.device_client.on_connection_state_change = (  # type: ignore[attr-defined]
+            self._on_connection_state_change
+        )
+        self.device_client.on_background_exception = (  # type: ignore[attr-defined]
+            self._on_background_exception
+        )
 
     async def _on_connection_state_change(self) -> None:
         """Log the new connection status reported by the SDK.
@@ -39,7 +45,8 @@ class ConnectionMonitor:
         Returns:
             None
         """
-        status = "CONNECTED" if self.device_client.connected else "DISCONNECTED"  # type: ignore[attr-defined]
+        connected = self.device_client.connected  # type: ignore[attr-defined]
+        status = "CONNECTED" if connected else "DISCONNECTED"
         logger.info("Connection to IoT Hub updated: %s", status)
 
     async def _on_background_exception(self, exc: Exception) -> None:
