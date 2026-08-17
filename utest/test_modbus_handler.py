@@ -151,6 +151,46 @@ class TestModBusHandler(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.handler._convert_param_addr("abc")
 
+    # ---- Write Parameter Response Validation Tests ----
+
+    @staticmethod
+    def _write_response(address: int, count: int) -> MagicMock:
+        """Build a WriteMultipleRegisterResponse-like mock with PDU attributes."""
+        response = MagicMock(spec=["isError", "function_code", "address", "count"])
+        response.isError.return_value = False
+        response.function_code = 0x10
+        response.address = address
+        response.count = count
+        return response
+
+    def test_validate_write_param_response_match(self) -> None:
+        """Test ack echoing the converted address and count 2 passes."""
+        response = self._write_response(address=200, count=2)
+        status, name, code = self.handler._validate_write_param_response(
+            response, "100"
+        )
+        assert (status, name, code) == (0, "ModBusHandler", MbCode.NO_ERR.name)
+
+    def test_validate_write_param_response_address_mismatch(self) -> None:
+        """Test ack with wrong echoed address is rejected."""
+        response = self._write_response(address=198, count=2)
+        status, _, code = self.handler._validate_write_param_response(response, "100")
+        assert (status, code) == (-1, MbCode.COM_ERR.name)
+
+    def test_validate_write_param_response_count_mismatch(self) -> None:
+        """Test ack with wrong register count is rejected."""
+        response = self._write_response(address=200, count=1)
+        status, _, code = self.handler._validate_write_param_response(response, "100")
+        assert (status, code) == (-1, MbCode.COM_ERR.name)
+
+    def test_validate_write_param_response_missing_pdu_attrs(self) -> None:
+        """Test response lacking address/count attributes is rejected, not crash."""
+        response = MagicMock(spec=["isError", "function_code"])
+        response.isError.return_value = False
+        response.function_code = 0x10
+        status, _, code = self.handler._validate_write_param_response(response, "100")
+        assert (status, code) == (-1, MbCode.COM_ERR.name)
+
     # ---- Value Packing Tests ----
 
     def test_pack_value_positive(self) -> None:
