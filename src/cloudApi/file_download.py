@@ -95,10 +95,9 @@ async def download_file(
         logger.error("Failed to read blob properties: %s", e)
         return None, None, MrhCode.DOWNLOAD_ERR.name
 
-    # download_from_blob swallows its own exceptions, so confirm via existence.
-    await download_from_blob(uri, fullpath)
-    if not os.path.exists(fullpath):
-        logger.error("Download did not produce a file at %s", fullpath)
+    # max_bytes is enforced again while streaming: the reported size above
+    # is only a fast pre-check and can diverge from actual transferred bytes.
+    if not await download_from_blob(uri, fullpath, max_bytes=max_bytes):
         return None, None, MrhCode.DOWNLOAD_ERR.name
 
     return filename, fullpath, MrhCode.NO_ERR.name

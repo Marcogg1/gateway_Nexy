@@ -106,7 +106,7 @@ async def main():
     # Step 7: Download blob to temp file
     logger.info("Step 7: Downloading blob...")
     temp_download_path = os.path.join(tempfile.gettempdir(), f"download_{blob_name}")
-    # Remove if exists so download_from_blob doesn't skip it
+    # Start from a clean path so the verify step below checks this download
     if os.path.exists(temp_download_path):
         os.remove(temp_download_path)
     try:

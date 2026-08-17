@@ -23,42 +23,56 @@ def _redact_sas(text: str) -> str:
     return _SAS_SIG_RE.sub(r"\1***", text)
 
 
-async def download_from_blob(blob_url: str, destination_path: str) -> None:
+async def download_from_blob(
+    blob_url: str, destination_path: str, max_bytes: int | None = None
+) -> bool:
     """
     Download a blob from Azure Blob Storage to a local file.
 
     This is the Python equivalent of the old C++ DownloadFile() function.
     The cloud provides the full SAS URL via direct methods or desired properties.
 
-    Uses atomic write (download to .tmp, then rename) and is idempotent
-    (skips download if file already exists).
+    Uses atomic write (download to .tmp, then rename), so an existing file
+    is replaced only after the new content has been fully downloaded; a
+    failed download leaves any existing file untouched. Unlike the legacy
+    C++ code this overwrites an existing file, so repeated downloads pick
+    up updated content.
 
     Args:
         blob_url: Full blob URL with SAS token.
         destination_path: Local file path to write the downloaded data.
-    """
-    # Idempotent: skip if file already exists
-    if os.path.exists(destination_path):
-        logger.info(f"File already exists at {destination_path}, skipping download")
-        return
+        max_bytes: Abort the transfer once more than this many bytes have
+            been received. None means no limit.
 
+    Returns:
+        True if the file was downloaded and moved into place, False on
+        any failure (already logged).
+    """
     tmp_path = f"{destination_path}.tmp"
 
     try:
         # Create parent directories if needed
         os.makedirs(os.path.dirname(destination_path), exist_ok=True)
 
-        # Download blob data
+        # Stream the blob in chunks so the size cap bounds actual received
+        # bytes (the blob's reported size can't be trusted) and the whole
+        # file is never buffered in memory.
         blob_client = BlobClient.from_blob_url(blob_url)
         stream = blob_client.download_blob()
-        data = stream.readall()
-
-        # Atomic write: write to .tmp first, then rename
+        total = 0
         with open(tmp_path, "wb") as f:
-            f.write(data)
+            while chunk := stream.read(65536):
+                total += len(chunk)
+                if max_bytes is not None and total > max_bytes:
+                    raise ValueError(
+                        f"transfer exceeded size cap ({total} > {max_bytes} bytes)"
+                    )
+                f.write(chunk)
 
+        # Atomic write: rename .tmp over the destination
         os.replace(tmp_path, destination_path)
-        logger.info(f"Downloaded {len(data)} bytes to {destination_path}")
+        logger.info(f"Downloaded {total} bytes to {destination_path}")
+        return True
 
     except Exception as e:
         # Azure SDK errors often embed the full request URL incl. the SAS
@@ -71,3 +85,4 @@ async def download_from_blob(blob_url: str, destination_path: str) -> None:
             os.remove(tmp_path)
         except OSError:
             pass
+        return False

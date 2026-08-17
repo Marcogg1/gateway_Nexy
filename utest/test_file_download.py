@@ -43,14 +43,25 @@ class TestDownloadFile(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(code, "SIZE_ERR")
 
     @patch("cloudApi.file_download.download_from_blob", new_callable=AsyncMock)
-    @patch("cloudApi.file_download.os.path.exists", return_value=True)
     @patch("cloudApi.file_download.BlobClient")
-    async def test_happy_path(self, mock_blob_cls, mock_exists, mock_dl):
+    async def test_happy_path(self, mock_blob_cls, mock_dl):
         props = MagicMock()
         props.size = 100
         mock_blob_cls.from_blob_url.return_value.get_blob_properties.return_value = props
+        mock_dl.return_value = True
         fn, fp, code = await file_download.download_file(GOOD_URI, "0x0B", 1000)
         self.assertEqual(fn, "leds.sh")
         self.assertEqual(fp, os.path.join("/data/downloads", "script", "leds.sh"))
         self.assertEqual(code, "NO_ERR")
-        mock_dl.assert_awaited_once_with(GOOD_URI, fp)
+        mock_dl.assert_awaited_once_with(GOOD_URI, fp, max_bytes=1000)
+
+    @patch("cloudApi.file_download.download_from_blob", new_callable=AsyncMock)
+    @patch("cloudApi.file_download.BlobClient")
+    async def test_transfer_failure_reported(self, mock_blob_cls, mock_dl):
+        """A failed transfer must return DOWNLOAD_ERR, not silent success."""
+        props = MagicMock()
+        props.size = 100
+        mock_blob_cls.from_blob_url.return_value.get_blob_properties.return_value = props
+        mock_dl.return_value = False
+        fn, fp, code = await file_download.download_file(GOOD_URI, "0x0B", 1000)
+        self.assertEqual((fn, fp, code), (None, None, "DOWNLOAD_ERR"))
