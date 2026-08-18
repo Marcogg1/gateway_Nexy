@@ -98,7 +98,7 @@ class DiskHandler:
 
         except Exception as e:
             logger.error("Could not use config file", exc_info=True)
-            # raise SystemExit TODO: Remove comment
+            raise SystemExit(f"DiskHandler: cannot load config.json: {e}") from e
 
     def check_status(self, args: list) -> tuple[str, str, str]:
         """

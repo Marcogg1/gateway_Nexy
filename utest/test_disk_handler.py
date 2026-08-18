@@ -373,3 +373,11 @@ class TestDiskHandler(unittest.TestCase):
         spec = 'Donny'
         disk_stat = self.dh.get_disk_info(spec)
         assert disk_stat == 0
+
+
+class TestDiskHandlerConfigFailure(unittest.TestCase):
+
+    def test_config_load_failure_raises(self):
+        with mock.patch("builtins.open", side_effect=OSError("no config")):
+            with self.assertRaises(SystemExit):
+                DH.DiskHandler()

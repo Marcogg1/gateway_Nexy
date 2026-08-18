@@ -138,12 +138,9 @@ class ModBusHandler:
         self.lcm_address = 0x0A
         self.client: ModbusSerialClient | None = None
 
-        # Initialize disk handler
-        try:
-            self.disk_handler = DiskHandler()
-        except SystemExit as e:
-            logger.error("Fatal error during DiskHandler initialization")
-            raise SystemExit from e
+        # Initialize disk handler — config.json failure is fatal
+        # (DiskHandler raises SystemExit, let it propagate)
+        self.disk_handler = DiskHandler()
 
         # Initialize configurations
         self.write_record = WriteRecordConfig()
