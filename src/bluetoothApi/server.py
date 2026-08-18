@@ -119,6 +119,7 @@ class BluetoothServer:
         )
         self._server: Any = None
         self._status_char: Any = None
+        self._tasks: set[asyncio.Task] = set()
 
     # --- characteristic callbacks (sync — called from SDK on the loop) ------
 
@@ -180,14 +181,29 @@ class BluetoothServer:
 
     # --- internals ----------------------------------------------------------
 
-    @staticmethod
-    def _dispatch(coro: Any) -> None:
-        """Schedule a controller coroutine on the running loop."""
+    def _dispatch(self, coro: Any) -> None:
+        """Schedule a controller coroutine on the running loop.
+
+        Holds a reference to the task (create_task results are only weakly
+        referenced by the loop) and logs any exception on completion.
+        """
         try:
-            asyncio.get_running_loop().create_task(coro)
+            task = asyncio.get_running_loop().create_task(coro)
         except RuntimeError:
             logger.warning("no running loop; dropping BLE callback")
             coro.close()
+            return
+        self._tasks.add(task)
+        task.add_done_callback(self._on_dispatch_done)
+
+    def _on_dispatch_done(self, task: asyncio.Task) -> None:
+        """Drop the finished task's reference and log its exception, if any."""
+        self._tasks.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("BLE dispatch task failed", exc_info=exc)
 
     @staticmethod
     def _parse_force(value: bytes) -> bool:
@@ -272,7 +288,11 @@ class BluetoothServer:
         await self._controller.start_heartbeat()
 
     async def stop(self) -> None:
-        """Stop heartbeat, stop GATT server."""
+        """Cancel in-flight callbacks, stop heartbeat, stop GATT server."""
+        for task in list(self._tasks):
+            task.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
         await self._controller.stop_heartbeat()
         if self._server is not None:
             await self._server.stop()

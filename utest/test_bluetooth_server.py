@@ -332,3 +332,51 @@ class TestStartStopLifecycle(unittest.IsolatedAsyncioTestCase):
         await server.start()
         await server.stop()
         self.assertTrue(server._server.stopped)  # type: ignore[attr-defined]
+
+
+class TestDispatchTaskTracking(unittest.IsolatedAsyncioTestCase):
+    async def test_dispatch_holds_task_reference(self):
+        server = _make_server(_FakeCli())
+
+        async def work():
+            await asyncio.Event().wait()
+
+        server._dispatch(work())
+        self.assertEqual(len(server._tasks), 1)
+        await server.stop()
+
+    async def test_stop_cancels_outstanding_tasks(self):
+        server = _make_server(_FakeCli())
+        started = asyncio.Event()
+
+        async def work():
+            started.set()
+            await asyncio.Event().wait()
+
+        server._dispatch(work())
+        await asyncio.wait_for(started.wait(), 1)
+        task = next(iter(server._tasks))
+        await server.stop()
+        self.assertTrue(task.cancelled())
+
+    async def test_done_task_removed_from_set(self):
+        server = _make_server(_FakeCli())
+
+        async def work():
+            return None
+
+        server._dispatch(work())
+        await _drain_loop()
+        self.assertEqual(len(server._tasks), 0)
+
+    async def test_failed_task_logs_exception(self):
+        server = _make_server(_FakeCli())
+
+        async def work():
+            raise RuntimeError("boom")
+
+        with self.assertLogs("bluetoothApi.server", level="ERROR") as cm:
+            server._dispatch(work())
+            await _drain_loop()
+        self.assertTrue(any("dispatch task failed" in line for line in cm.output))
+        self.assertEqual(len(server._tasks), 0)
