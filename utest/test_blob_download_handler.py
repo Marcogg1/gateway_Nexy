@@ -4,6 +4,7 @@
 
 import os
 import sys
+import threading
 import unittest
 from unittest.mock import MagicMock, mock_open, patch
 
@@ -46,7 +47,9 @@ class TestBlobDownloadHandler(unittest.IsolatedAsyncioTestCase):
         mock_makedirs.assert_called_once_with(
             os.path.dirname(self.destination_path), exist_ok=True
         )
-        mock_blob_client.from_blob_url.assert_called_once_with(self.blob_url)
+        mock_blob_client.from_blob_url.assert_called_once_with(
+            self.blob_url, connection_timeout=30, read_timeout=60
+        )
         mock_blob.download_blob.assert_called_once()
         mock_file.assert_called_once_with(f"{self.destination_path}.tmp", "wb")
         mock_file().write.assert_any_call(b"blob ")
@@ -74,7 +77,9 @@ class TestBlobDownloadHandler(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result)
         mock_exists.assert_not_called()
-        mock_blob_client.from_blob_url.assert_called_once_with(self.blob_url)
+        mock_blob_client.from_blob_url.assert_called_once_with(
+            self.blob_url, connection_timeout=30, read_timeout=60
+        )
         mock_replace.assert_called_once_with(
             f"{self.destination_path}.tmp", self.destination_path
         )
@@ -151,6 +156,33 @@ class TestBlobDownloadHandler(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result)
         mock_replace.assert_not_called()
         mock_remove.assert_called_once_with(f"{self.destination_path}.tmp")
+
+    @patch("cloudApi.blob_download_handler.os.replace")
+    @patch("builtins.open", new_callable=mock_open)
+    @patch("cloudApi.blob_download_handler.BlobClient")
+    @patch("cloudApi.blob_download_handler.os.makedirs")
+    async def test_transfer_runs_off_event_loop(
+        self, mock_makedirs, mock_blob_client, mock_file, mock_replace
+    ):
+        """Test the blocking SDK read happens on a worker thread, not the loop."""
+        loop_thread = threading.get_ident()
+        seen: list[int] = []
+        stream = MagicMock()
+
+        def read(_size):
+            seen.append(threading.get_ident())
+            return b"data" if len(seen) == 1 else b""
+
+        stream.read.side_effect = read
+        mock_blob = MagicMock()
+        mock_blob.download_blob.return_value = stream
+        mock_blob_client.from_blob_url.return_value = mock_blob
+
+        result = await download_from_blob(self.blob_url, self.destination_path)
+
+        self.assertTrue(result)
+        self.assertTrue(seen)
+        self.assertNotEqual(seen[0], loop_thread)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 """Azure Blob Storage download handler."""
 
+import asyncio
 import logging
 import os
 import re
@@ -12,6 +13,48 @@ logger = logging.getLogger(__name__)
 # Mask the SAS signature wherever it appears in free text (e.g. SDK
 # exception messages that embed the full request URL).
 _SAS_SIG_RE = re.compile(r"(sig=)[^&\s]+", re.IGNORECASE)
+
+# Socket-level timeouts for the sync SDK — without a read timeout a stalled
+# connection would pin the worker thread indefinitely.
+_CONNECT_TIMEOUT_S = 30
+_READ_TIMEOUT_S = 60
+
+
+def _transfer_to_file(blob_url: str, tmp_path: str, max_bytes: int | None) -> int:
+    """Blocking chunked download to tmp_path; runs in a worker thread.
+
+    Streams in chunks so the size cap bounds actual received bytes (the
+    blob's reported size can't be trusted) and the whole file is never
+    buffered in memory.
+
+    Args:
+        blob_url: Full blob URL with SAS token.
+        tmp_path: Temporary file path to write into.
+        max_bytes: Abort once more than this many bytes received. None
+            means no limit.
+
+    Returns:
+        Total bytes written.
+
+    Raises:
+        ValueError: If the transfer exceeds max_bytes.
+    """
+    blob_client = BlobClient.from_blob_url(
+        blob_url,
+        connection_timeout=_CONNECT_TIMEOUT_S,
+        read_timeout=_READ_TIMEOUT_S,
+    )
+    stream = blob_client.download_blob()
+    total = 0
+    with open(tmp_path, "wb") as f:
+        while chunk := stream.read(65536):
+            total += len(chunk)
+            if max_bytes is not None and total > max_bytes:
+                raise ValueError(
+                    f"transfer exceeded size cap ({total} > {max_bytes} bytes)"
+                )
+            f.write(chunk)
+    return total
 
 
 def _redact_sas(text: str) -> str:
@@ -54,20 +97,11 @@ async def download_from_blob(
         # Create parent directories if needed
         os.makedirs(os.path.dirname(destination_path), exist_ok=True)
 
-        # Stream the blob in chunks so the size cap bounds actual received
-        # bytes (the blob's reported size can't be trusted) and the whole
-        # file is never buffered in memory.
-        blob_client = BlobClient.from_blob_url(blob_url)
-        stream = blob_client.download_blob()
-        total = 0
-        with open(tmp_path, "wb") as f:
-            while chunk := stream.read(65536):
-                total += len(chunk)
-                if max_bytes is not None and total > max_bytes:
-                    raise ValueError(
-                        f"transfer exceeded size cap ({total} > {max_bytes} bytes)"
-                    )
-                f.write(chunk)
+        # Sync Azure SDK — run in a worker thread so a large or stalled
+        # transfer can't block heartbeats and direct methods on the loop.
+        total = await asyncio.to_thread(
+            _transfer_to_file, blob_url, tmp_path, max_bytes
+        )
 
         # Atomic write: rename .tmp over the destination
         os.replace(tmp_path, destination_path)
