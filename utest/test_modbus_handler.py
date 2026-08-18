@@ -394,5 +394,31 @@ class TestModBusHandler(unittest.TestCase):
         assert config.types[1] == "0x02"
 
 
+class TestSetupConnectionReuse(unittest.TestCase):
+    """Tests for stale-client handling in _setup_connection."""
+
+    def setUp(self) -> None:
+        with patch("pymodbus.client.ModbusSerialClient"), \
+             patch("filemgmt.disk_handler.DiskHandler"):
+            self.handler = ModBusHandler()
+
+    def test_setup_connection_closes_stale_client(self) -> None:
+        """Recreating the client must close the old one (exclusive port)."""
+        stale = MagicMock()
+        self.handler.client = stale
+        with patch("liftApi.modbus_handler.ModbusSerialClient"):
+            self.handler._setup_connection()
+        stale.close.assert_called_once()
+
+    def test_setup_connection_survives_close_failure(self) -> None:
+        """A failing close must not prevent the reconnect."""
+        stale = MagicMock()
+        stale.close.side_effect = OSError("fd gone")
+        self.handler.client = stale
+        with patch("liftApi.modbus_handler.ModbusSerialClient") as mock_cls:
+            self.handler._setup_connection()
+        self.assertIs(self.handler.client, mock_cls.return_value)
+
+
 if __name__ == "__main__":
     unittest.main()

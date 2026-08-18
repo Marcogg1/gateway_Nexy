@@ -179,6 +179,14 @@ class ModBusHandler:
         self._modbus_link = os.path.exists(self.rs_port)
         logger.info("Using port %s", self.rs_port)
 
+        # Port opens with exclusive=True — close any stale client first so
+        # a lingering fd can't block the reopen.
+        if self.client is not None:
+            try:
+                self.client.close()
+            except Exception:
+                logger.warning("Failed to close stale Modbus client", exc_info=True)
+
         self.client = ModbusSerialClient(
             port=self.rs_port,
             baudrate=115200,
