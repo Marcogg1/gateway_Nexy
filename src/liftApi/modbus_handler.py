@@ -27,10 +27,9 @@ from pymodbus.pdu.file_message import WriteFileRecordResponse
 
 from filemgmt.disk_handler import DiskHandler
 from lib.error_signals import MbCode
-from lib.logging_config import get_logger, setup_logging
+from lib.logging_config import get_logger
 from liftApi.modbus_file_record import ReadFileRecord, WriteFileRecord
 
-setup_logging()
 logger = get_logger(__name__)
 
 

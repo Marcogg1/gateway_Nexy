@@ -9,10 +9,8 @@ from collections.abc import KeysView
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)))
 from lib.error_signals import MbCode
-from lib.logging_config import setup_logging, get_logger
+from lib.logging_config import get_logger
 
-# Setup logging at module level
-setup_logging()
 logger = get_logger(__name__)
 
 

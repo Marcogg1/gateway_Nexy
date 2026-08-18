@@ -14,10 +14,8 @@ from lib.sync_time_handler import SyncTimeHandler
 from lib.error_signals import Rs232Code
 from filemgmt.disk_handler import DiskHandler
 from lib.thousand_lib import ThousandLib
-from lib.logging_config import setup_logging, get_logger
+from lib.logging_config import get_logger
 
-# Setup logging at module level
-setup_logging()
 logger = get_logger(__name__)
 
 

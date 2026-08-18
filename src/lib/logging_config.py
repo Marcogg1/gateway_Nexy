@@ -41,7 +41,17 @@ def setup_logging(
         try:
             with open(config_file, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
-            
+
+            # Rewrite relative handler paths against the created log dir —
+            # YAML paths like 'logs/x.log' resolve against CWD, which in the
+            # prod image has no logs/ dir and kills all file logging.
+            for handler in config.get('handlers', {}).values():
+                filename = handler.get('filename')
+                if filename and not os.path.isabs(filename):
+                    handler['filename'] = os.path.join(
+                        log_dir, os.path.basename(filename)
+                    )
+
             # Apply the configuration
             logging.config.dictConfig(config)
             
@@ -55,8 +65,10 @@ def setup_logging(
                 format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
             )
             logger = logging.getLogger(__name__)
-            logger.error(f"Error loading logging configuration from {config_file}: {e}")
-            logger.warning("Using basic logging configuration")
+            logger.error(
+                f"Error loading logging configuration from {config_file}: {e}. "
+                "File logging is DISABLED — console-only fallback active."
+            )
     else:
         # Fallback to basic configuration
         logging.basicConfig(
