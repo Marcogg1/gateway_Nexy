@@ -42,11 +42,17 @@ class SyncTimeHandler:
 
         time.sleep(rs232_handler.serial_timeout)
         _, resp_wanted, _, err_code = rs232_handler.get_signal_from_serial_buffer('time')
-        response = resp_wanted[0]['updated']
 
         if err_code != SyncTimeCode.NO_ERR.name:
             logger.error("Error: Failed to get time read response from serial buffer.")
             return -1, self.name, err_code
+
+        if not (isinstance(resp_wanted, list) and resp_wanted
+                and isinstance(resp_wanted[0], dict) and 'updated' in resp_wanted[0]):
+            logger.error("Error: malformed time response from serial buffer.")
+            return -1, self.name, self.SyncTimeCode.EPOCH_TIME_ERR.name
+
+        response = resp_wanted[0]['updated']
 
         if response == 'false':
             err_code = SyncTimeCode.EPOCH_TIME_ERR.name

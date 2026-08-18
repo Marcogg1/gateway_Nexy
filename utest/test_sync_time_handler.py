@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 p = os.path.abspath(os.path.join(os.path.abspath(os.path.dirname(__file__)), os.path.pardir, 'src'))
 sys.path.append(p)
 from lib import sync_time_handler
-from lib.error_signals import SyncTimeCode, MbCode
+from lib.error_signals import SyncTimeCode, MbCode, Rs232Code
 
 
 class TestSyncTimeHandler(unittest.TestCase):
@@ -101,3 +101,42 @@ class TestSyncTimeHandler(unittest.TestCase):
         modbus_response = (-1, MbCode.SOURCE.name, MbCode.NO_ERR.name)
         expected_return = (self.handler.name, SyncTimeCode.NO_ERR.name)
         assert self.handler._SyncTimeHandler__handle_modbus_response(modbus_response) == expected_return
+
+
+class TestSyncTimeRs232Failures(unittest.TestCase):
+    """Failure paths in sync_time_rs232 (EG-75 / AUD-025)."""
+
+    def setUp(self):
+        print("\nSetup: {}".format(self._testMethodName))
+        self.st = sync_time_handler.SyncTimeHandler()
+        self.rs232 = mock.MagicMock()
+        self.rs232.serial_timeout = 0
+        self.rs232.write_serial.return_value = (0, 0, 0, 0, Rs232Code.NO_ERR.name)
+
+    def tearDown(self):
+        print("\nTest done: {}".format(self._testMethodName))
+
+    def test_buffer_read_failure_returns_err_without_indexing(self):
+        self.rs232.get_signal_from_serial_buffer.return_value = (
+            -1, -1, -1, Rs232Code.SERIAL_COM_ERR.name
+        )
+        result, source, code = self.st.sync_time_rs232("1755500000", self.rs232)
+        self.assertEqual(result, -1)
+        self.assertEqual(source, self.st.name)
+        self.assertEqual(code, Rs232Code.SERIAL_COM_ERR.name)
+
+    def test_malformed_response_shape_returns_err(self):
+        self.rs232.get_signal_from_serial_buffer.return_value = (
+            0, [], 0, SyncTimeCode.NO_ERR.name
+        )
+        result, source, code = self.st.sync_time_rs232("1755500000", self.rs232)
+        self.assertEqual(result, -1)
+        self.assertEqual(code, SyncTimeCode.EPOCH_TIME_ERR.name)
+
+    def test_success_path_returns_response(self):
+        self.rs232.get_signal_from_serial_buffer.return_value = (
+            0, [{"updated": "true"}], 0, SyncTimeCode.NO_ERR.name
+        )
+        result, source, code = self.st.sync_time_rs232("1755500000", self.rs232)
+        self.assertEqual(result, "true")
+        self.assertEqual(code, SyncTimeCode.NO_ERR.name)
