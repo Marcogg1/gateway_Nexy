@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 p = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "src"))
 sys.path.append(p)
@@ -193,37 +194,66 @@ class TestSeqAndTimestamps(_Base):
 
 
 class TestHeartbeat(unittest.IsolatedAsyncioTestCase):
+    # The heartbeat loop's asyncio.sleep is patched to yield without real
+    # delay — wall-clock sleeps flake on Windows CI timer resolution.
+
     async def test_starts_and_stops_cleanly(self):
         cli = _FakeCli()
         ticks: list[bytes] = []
+        enough = asyncio.Event()
 
         async def on_tick(payload: bytes) -> None:
             ticks.append(payload)
+            if len(ticks) >= 2:
+                enough.set()
+
+        # Capture the real sleep — the patch target is the shared asyncio
+        # module, so calling asyncio.sleep inside would hit the mock.
+        real_sleep = asyncio.sleep
+
+        async def instant_sleep(_delay: float) -> None:
+            await real_sleep(0)
 
         controller = WifiController(
             cli=cli, on_tick=on_tick, refresh_interval_s=0.01, clock=_Counter()
         )
-        await controller.start_heartbeat()
-        await asyncio.sleep(0.1)  # multiple ticks at 0.01s interval
-        await controller.stop_heartbeat()
+        with patch(
+            "bluetoothApi.controller.asyncio.sleep", side_effect=instant_sleep
+        ):
+            await controller.start_heartbeat()
+            await asyncio.wait_for(enough.wait(), timeout=5)
+            await controller.stop_heartbeat()
         self.assertGreaterEqual(len(ticks), 2)
 
     async def test_refreshes_current_when_connected(self):
         cli = _FakeCli()
         cli.connect_return = ConnectResult("connected", "Home", "10.0.0.5")
         cli.status_return = ConnectionInfo("Home", -42, "10.0.0.5")
-        ticks: list[bytes] = []
+        got_tick = asyncio.Event()
 
         async def on_tick(payload: bytes) -> None:
-            ticks.append(payload)
+            got_tick.set()
+
+        # Capture the real sleep — the patch target is the shared asyncio
+        # module, so calling asyncio.sleep inside would hit the mock.
+        real_sleep = asyncio.sleep
+
+        async def instant_sleep(_delay: float) -> None:
+            await real_sleep(0)
 
         controller = WifiController(
             cli=cli, on_tick=on_tick, refresh_interval_s=0.01, clock=_Counter()
         )
         await controller.request_connect("Home", "longpsk1234", "wlan0")
-        await controller.start_heartbeat()
-        await asyncio.sleep(0.03)
-        await controller.stop_heartbeat()
+        # request_connect emits its own tick; only ticks after this point
+        # come from the heartbeat (which refreshes before emitting).
+        got_tick.clear()
+        with patch(
+            "bluetoothApi.controller.asyncio.sleep", side_effect=instant_sleep
+        ):
+            await controller.start_heartbeat()
+            await asyncio.wait_for(got_tick.wait(), timeout=5)
+            await controller.stop_heartbeat()
         full = json.loads(await controller.get_status_json())
         self.assertEqual(full["current"]["rssi"], -42)
 

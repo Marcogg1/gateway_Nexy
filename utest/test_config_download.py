@@ -19,9 +19,12 @@ class TestDownloadConfig(unittest.TestCase):
         self.assertEqual(Config.DOWNLOAD_TYPE_DIRS["0x08"], "liftAgent")
         self.assertEqual(Config.DOWNLOAD_TYPE_DIRS["0x0B"], "script")
 
-    def test_host_allowlist_is_list(self):
-        self.assertIsInstance(Config.DOWNLOAD_HOST_ALLOWLIST, list)
-        self.assertTrue(Config.DOWNLOAD_HOST_ALLOWLIST)
+    def test_host_allowlist_pinned(self):
+        # Security control: broadening the allowlist must fail the suite
+        # until a reviewer deliberately updates this expectation.
+        self.assertEqual(
+            Config.DOWNLOAD_HOST_ALLOWLIST, ["*.blob.core.windows.net"]
+        )
 
     def test_max_bytes_default_positive(self):
         self.assertGreater(Config.DOWNLOAD_MAX_BYTES_DEFAULT, 0)
