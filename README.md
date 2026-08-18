@@ -87,6 +87,18 @@ Common startup failures:
 
 ## Acceptance testing
 
+### Test suites: CI vs bench-only
+
+| Suite | Where it runs | Needs |
+|-------|---------------|-------|
+| `utest/` | CI (Azure Pipelines) + local | nothing — fully mocked |
+| `tests/iot-test/` | bench only (manual) | live IoT Hub + running gateway |
+| `tests/test_blob_integration.py` | bench only (manual) | Azure storage credentials |
+
+CI runs `utils/delivery_check.py -a -x -l -u`, which executes `utest/` only.
+The bench suites are operator tools and are never collected in CI — run
+`pytest utest/` locally, not bare `pytest` from the repo root.
+
 `tests/iot-test/` — service-side DDM acceptance harness (runs on the dev PC
 against a live GW through IoT Hub). See `tests/iot-test/README.md` for setup;
 quick form:

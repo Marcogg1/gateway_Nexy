@@ -14,6 +14,8 @@ jobs:
       pip install -r requirements_host.txt
     displayName: 'Install dependencies'
 
+  # Runs utest/ only; tests/iot-test/ and tests/test_blob_integration.py are
+  # bench-only (need a live hub/storage) — see README "Test suites".
   - task: PythonScript@0
     inputs:
       scriptSource: 'filePath'
