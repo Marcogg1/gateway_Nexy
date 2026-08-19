@@ -5,6 +5,7 @@ Unit tests for ModBusHandler.
 Tests cover parameter read/write operations, log generation, and special
 handlers for reset alarms, speed config, and floor locks.
 """
+import ctypes
 import sys
 import unittest
 from pathlib import Path
@@ -191,6 +192,42 @@ class TestModBusHandler(unittest.TestCase):
         status, _, code = self.handler._validate_write_param_response(response, "100")
         assert (status, code) == (-1, MbCode.COM_ERR.name)
 
+    # ---- Read Parameter Response Validation Tests ----
+
+    @staticmethod
+    def _read_response(registers: list[int]) -> MagicMock:
+        """Build a ReadHoldingRegistersResponse-like mock."""
+        response = MagicMock(spec=["isError", "function_code", "registers"])
+        response.isError.return_value = False
+        response.function_code = 0x03
+        response.registers = registers
+        return response
+
+    def test_validate_read_param_response_positive(self) -> None:
+        """Test positive 32-bit value decodes from two registers."""
+        response = self._read_response([0x0001, 0x0001])
+        value, _, code = self.handler._validate_read_param_response(response)
+        assert (value, code) == (65537, MbCode.NO_ERR.name)
+
+    def test_validate_read_param_response_negative(self) -> None:
+        """Test negative 32-bit value decodes as signed, not unsigned."""
+        response = self._read_response([0xFFFF, 0xFFFF])
+        value, _, code = self.handler._validate_read_param_response(response)
+        assert (value, code) == (-1, MbCode.NO_ERR.name)
+
+    def test_validate_read_param_response_negative_on_64bit_c_long(self) -> None:
+        """Test sign decode is independent of platform c_long width (LP64 prod)."""
+        with patch("liftApi.modbus_handler.ctypes.c_long", ctypes.c_int64):
+            response = self._read_response([0xFFFF, 0xFFFF])
+            value, _, code = self.handler._validate_read_param_response(response)
+        assert (value, code) == (-1, MbCode.NO_ERR.name)
+
+    def test_validate_read_param_response_int32_min(self) -> None:
+        """Test INT32_MIN decodes correctly."""
+        response = self._read_response([0x8000, 0x0000])
+        value, _, code = self.handler._validate_read_param_response(response)
+        assert (value, code) == (-(1 << 31), MbCode.NO_ERR.name)
+
     # ---- Value Packing Tests ----
 
     def test_pack_value_positive(self) -> None:
@@ -213,10 +250,20 @@ class TestModBusHandler(unittest.TestCase):
         packed = self.handler._pack_value("-1")
         assert packed == [0xFFFF, 0xFFFF]
 
+    def test_pack_value_int32_min(self) -> None:
+        """Test packing INT32_MIN."""
+        packed = self.handler._pack_value(str(-(1 << 31)))
+        assert packed == [0x8000, 0x0000]
+
     def test_pack_value_out_of_bounds(self) -> None:
         """Test packing value out of bounds."""
         with self.assertRaises(ValueError):
             self.handler._pack_value(str(1 << 32))
+
+    def test_pack_value_below_int32_min(self) -> None:
+        """Test values below INT32_MIN are rejected, not silently wrapped."""
+        with self.assertRaises(ValueError):
+            self.handler._pack_value(str(-(1 << 31) - 1))
 
     def test_pack_value_invalid_type(self) -> None:
         """Test packing with invalid type."""

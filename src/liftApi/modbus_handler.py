@@ -646,7 +646,7 @@ class ModBusHandler:
             return -1, self.name, MbCode.LCM_ERR.name
 
         value = (response.registers[0] << 16) + response.registers[1]
-        value = ctypes.c_long(value).value
+        value = ctypes.c_int32(value).value
 
         return value, self.name, MbCode.NO_ERR.name
 
@@ -1132,7 +1132,7 @@ class ModBusHandler:
             logger.error("Cannot pack value. %s.", e)
             raise TypeError from e
 
-        if val >= (1 << 32) or val < -(1 << 32):
+        if val >= (1 << 32) or val < -(1 << 31):
             logger.error("Value out of bounds")
             raise ValueError
 
