@@ -1694,15 +1694,29 @@ class Rs232Handler:
         :param versions: What versions to compare to. List as [U1, U16] format "X.Y"
         :return: True if above or equal else False
         """
-        u1_main_installed: int = int(self.tl.database[self.tl.params_2.MAIN_VERSION_2.value].value)
-        u1_sub_installed: int = int(self.tl.database[self.tl.params_2.SUB_VERSION_2.value].value)
-        u16_main_installed: int = int(self.tl.database[self.tl.params_version.ARGATE_MAIN_VERSION.value].value)
-        u16_sub_installed: int = int(self.tl.database[self.tl.params_version.ARGATE_SUB_VERSION.value].value)
+        installed_raw = [self.tl.database[self.tl.params_2.MAIN_VERSION_2.value].value,
+                         self.tl.database[self.tl.params_2.SUB_VERSION_2.value].value,
+                         self.tl.database[self.tl.params_version.ARGATE_MAIN_VERSION.value].value,
+                         self.tl.database[self.tl.params_version.ARGATE_SUB_VERSION.value].value]
 
-        u1_main_required: int = int(versions[0].split(".")[0])
-        u1_sub_required: int = int(versions[0].split(".")[1])
-        u16_main_required: int = int(versions[1].split(".")[0])
-        u16_sub_required: int = int(versions[1].split(".")[1])
+        if any(value == "" for value in installed_raw):
+            # Version params init to "" until the first successful poll
+            self.logger.debug("Version params not polled yet, version comparison not possible")
+            return False
+
+        try:
+            u1_main_installed: int = int(installed_raw[0])
+            u1_sub_installed: int = int(installed_raw[1])
+            u16_main_installed: int = int(installed_raw[2])
+            u16_sub_installed: int = int(installed_raw[3])
+
+            u1_main_required: int = int(versions[0].split(".")[0])
+            u1_sub_required: int = int(versions[0].split(".")[1])
+            u16_main_required: int = int(versions[1].split(".")[0])
+            u16_sub_required: int = int(versions[1].split(".")[1])
+        except (ValueError, IndexError) as error:
+            self.logger.warning(f"Version comparison failed on malformed version value: {error}")
+            return False
 
         if u1_main_required > u1_main_installed:
             return False

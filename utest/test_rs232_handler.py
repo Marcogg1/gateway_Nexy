@@ -2984,5 +2984,27 @@ class TestRs232Handler:
 
         assert self.rs.check_if_above_or_equal_to_versions(["4.6", "1.1"])
 
+    def test_check_if_above_or_equal_to_versions_unpolled(self):
+        """
+        Version params init to "" before first poll. Comparison must return
+        False instead of raising ValueError and aborting the poll cycle.
+        """
+        # setup_method leaves database values at their init defaults ("")
+        assert not self.rs.check_if_above_or_equal_to_versions(["0.0", "0.0"])
+
+    def test_check_if_above_or_equal_to_versions_malformed(self, caplog):
+        """
+        A malformed (non-empty, unparseable) version must return False and log
+        at WARNING — unlike the expected pre-poll "" state which stays at DEBUG.
+        Silent failure here permanently disables doorOpenCount telemetry.
+        """
+        self.rs.tl.database[self.rs.tl.params_2.MAIN_VERSION_2.value].value = "1.2b"
+        self.rs.tl.database[self.rs.tl.params_2.SUB_VERSION_2.value].value = 6
+        self.rs.tl.database[self.rs.tl.params_version.ARGATE_MAIN_VERSION.value].value = 1
+        self.rs.tl.database[self.rs.tl.params_version.ARGATE_SUB_VERSION.value].value = 1
+
+        assert not self.rs.check_if_above_or_equal_to_versions(["0.0", "0.0"])
+        assert any(rec.levelname == 'WARNING' for rec in caplog.records)
+
 
 
