@@ -270,6 +270,7 @@ class TestWriteParam(unittest.IsolatedAsyncioTestCase):
         self.mock_lib = MagicMock()
         self.proxy._handler = self.mock_handler
         self.proxy._lib = self.mock_lib
+        self.proxy._lift_type = LiftType.AHL
 
     async def test_handler_none_returns_init_err(self):
         self.proxy._handler = None
@@ -306,6 +307,33 @@ class TestWriteParam(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, -1)
         self.assertEqual(source, "Rs232Handler")
         self.assertEqual(code, "FLOOR_LOCK_ERR")
+
+    async def test_success_hex_value_updates_lib(self):
+        """Hex value strings must not crash the post-write cache update."""
+        self.mock_handler.write_parameter.return_value = (0, "ModBusHandler", "NO_ERR")
+        status, _, code = await self.proxy.write_param("5", "0x10")
+        self.assertEqual((status, code), (0, "NO_ERR"))
+        self.mock_lib.set_param.assert_called_once_with(5, 16)
+
+    async def test_success_leading_zero_value_updates_lib(self):
+        """Leading-zero decimals are accepted by _pack_value — cache must match."""
+        self.mock_handler.write_parameter.return_value = (0, "ModBusHandler", "NO_ERR")
+        await self.proxy.write_param("5", "042")
+        self.mock_lib.set_param.assert_called_once_with(5, 42)
+
+    async def test_1k_success_does_not_update_lib(self):
+        """Rs232Handler already updates the 1k cache — no manual int() update."""
+        self.proxy._lift_type = LiftType.ONE_K
+        self.mock_handler.write_parameter.return_value = (0, "Rs232Handler", "NO_ERR")
+        status, _, code = await self.proxy.write_param("5", "someText")
+        self.assertEqual((status, code), (0, "NO_ERR"))
+        self.mock_lib.set_param.assert_not_called()
+
+    async def test_success_unsigned_value_cached_as_int32(self):
+        """Cache must hold the signed decode the read path will report."""
+        self.mock_handler.write_parameter.return_value = (0, "ModBusHandler", "NO_ERR")
+        await self.proxy.write_param("5", "4294967295")
+        self.mock_lib.set_param.assert_called_once_with(5, -1)
 
 
 class TestGetParamPushList(unittest.TestCase):

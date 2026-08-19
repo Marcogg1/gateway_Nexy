@@ -5,6 +5,7 @@ All lift access (cloud, WiFi, BT) goes through this proxy.
 """
 
 import asyncio
+import ctypes
 import time
 from typing import Any, cast
 
@@ -17,7 +18,7 @@ from lib.logging_config import get_logger
 from lib.thousand_lib import ThousandLib
 from liftApi.idle_supervisor import IdleSupervisor, ParamChange
 from liftApi.lift_identifier import LiftType, identify_lift
-from liftApi.modbus_handler import ModBusHandler
+from liftApi.modbus_handler import ModBusHandler, parse_int_value
 from liftApi.rs232_handler import Rs232Handler
 
 logger = get_logger(__name__)
@@ -218,9 +219,25 @@ class LiftProxy:
             status, source, code = await asyncio.to_thread(
                 self._handler.write_parameter, [param, value]
             )
-        if status == 0 and self._lib is not None:
-            self._lib.set_param(int(param), int(value))
+        if status == 0:
+            self._mirror_ahl_write_to_cache(param, value)
         return status, source, code
+
+    def _mirror_ahl_write_to_cache(self, param: str, value: str) -> None:
+        """Mirror a successful AHL hardware write into the lib cache.
+
+        The value is wrapped to int32 so the cache holds the same signed
+        decode the read path reports (registers are written unsigned).
+        1k is skipped: Rs232Handler already updates the ThousandLib
+        cache on write, and its values may be string-typed.
+
+        Args:
+            param: Parameter number as string.
+            value: Written value as string (decimal or 0x-prefixed hex).
+        """
+        if self._lib is not None and self._lift_type == LiftType.AHL:
+            int_value = ctypes.c_int32(parse_int_value(value)).value
+            self._lib.set_param(int(param), int_value)
 
     async def poll_params(self, force_read_all: bool = False) -> list[int]:
         """Poll lift hardware for changed parameters.
