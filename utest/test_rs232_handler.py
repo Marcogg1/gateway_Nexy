@@ -919,6 +919,66 @@ class TestRs232Handler:
         assert len(status) == len((exp_serial_first + exp_serial_second).decode('utf-8'))
         assert status == (exp_serial_first + exp_serial_second).decode('utf-8')
 
+    def test_read_serial_truncated_frame_bounded(self):
+        """
+        A frame that never receives its closing brace must exhaust retries and
+        return, not loop forever. Legacy bug: the retry counter only incremented
+        on empty reads, so a truncated frame spun read_serial indefinitely while
+        holding the handler lock. Returns SERIAL_DECODE_ERR (bytes were flowing,
+        so NO_WAITING_BYTES_ERR would mislead cloud-side error tracking).
+        """
+        truncated = b'{"cmd": "operation", "type": 130, "data": [4, 5, '
+
+        self.rs._Rs232Handler__serial_available = mock.MagicMock(return_value=True)
+        self.rs.client.read = mock.MagicMock(return_value=truncated)
+        # One read with data, then silence forever (_SeqInt yields 0 when exhausted)
+        self.rs.client.in_waiting = _SeqInt([len(truncated)])
+
+        rsp_full, err_code = self.rs.read_serial()
+
+        assert rsp_full == -1
+        assert err_code == self.rsCodes.SERIAL_DECODE_ERR.name
+
+    def test_read_serial_slow_multichunk_frame(self):
+        """
+        A frame trickling in over many in_waiting windows must complete as long
+        as bytes keep arriving: progress resets the no-progress retry budget.
+        """
+        chunk_1 = b'{"cmd": "operation", '
+        chunk_2 = b'"type": 130, '
+        chunk_3 = b'"data": [1, 2]}'
+
+        self.rs._Rs232Handler__serial_available = mock.MagicMock(return_value=True)
+        self.rs.client.read = mock.MagicMock(side_effect=[chunk_1, chunk_2, chunk_3])
+        # Each chunk separated by 4 empty windows — more than 5 iterations in
+        # total, allowed because every chunk resets the retry budget.
+        self.rs.client.in_waiting = _SeqInt(
+            [len(chunk_1), 0, 0, 0, 0,
+             len(chunk_2), 0, 0, 0, 0,
+             len(chunk_3)])
+
+        rsp_full, err_code = self.rs.read_serial()
+
+        assert rsp_full == (chunk_1 + chunk_2 + chunk_3).decode('utf-8')
+        assert err_code == self.rsCodes.NO_ERR.name
+
+    def test_read_serial_tail_without_frame_start(self):
+        """
+        A leftover frame tail (ends with '}' but contains no '{') must be
+        discarded as an error. Legacy strip logic returned a lone '}' with
+        NO_ERR because rsp.find('{') == -1 sliced away all but the last char.
+        """
+        tail = b'6, 7]}'
+
+        self.rs._Rs232Handler__serial_available = mock.MagicMock(return_value=True)
+        self.rs.client.read = mock.MagicMock(return_value=tail)
+        self.rs.client.in_waiting = _SeqInt([len(tail)])
+
+        rsp_full, err_code = self.rs.read_serial()
+
+        assert rsp_full == -1
+        assert err_code == self.rsCodes.SERIAL_DECODE_ERR.name
+
     def test_read_serial_no_waiting_byte(self):
         """
         Test to read serial-port when no indata is waiting to be read

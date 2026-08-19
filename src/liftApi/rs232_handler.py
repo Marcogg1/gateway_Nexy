@@ -522,12 +522,15 @@ class Rs232Handler:
 
         rsp: str = ''
         retries: int = 5
+        max_iterations: int = 50
         i: int = 0
+        iterations: int = 0
         assert self.client is not None
-        while i < retries:
+        while i < retries and iterations < max_iterations:
+            iterations += 1
             try:
-                if self.client.in_waiting > 0:
-                    waiting_bytes: int = self.client.in_waiting
+                waiting_bytes: int = self.client.in_waiting
+                if waiting_bytes > 0:
                     rsp += self.client.read(size=waiting_bytes).decode('utf-8')
             except serial.SerialException as error:
                 self.logger.error("Error: Serial read exception")
@@ -538,23 +541,30 @@ class Rs232Handler:
                 self.logger.error(error)
                 return -1, self.rs232Codes.SERIAL_DECODE_ERR.name
 
-            if not rsp:
-                i += 1
-                self.logger.debug(f"No waiting bytes, attempt {i}/{retries}")
-                if i < retries:
-                    time.sleep(self.serial_timeout)
+            if rsp.endswith('}'):
+                if not rsp.startswith('{'):
+                    frame_start = rsp.find('{')
+                    if frame_start == -1:
+                        self.logger.error(f"Error: No frame start found in response, discarding: {rsp}")
+                        return -1, self.rs232Codes.SERIAL_DECODE_ERR.name
+                    self.logger.warning(f"Missing curly brace in beginning of rsp! Stripping away beginning of broken msg: "
+                               f"{rsp[:frame_start]}. We should have gotten a decode error previously. Can't save this one")
+                    rsp = rsp[frame_start:]
+
+                return rsp, self.rs232Codes.NO_ERR.name
+
+            if waiting_bytes > 0:
+                # Progress made: reset the no-progress retry budget
+                i = 0
             else:
-                if not rsp.endswith('}'):
-                    time.sleep(self.serial_timeout)
-                else:
-                    if not rsp.startswith('{'):
-                        substring = rsp[:rsp.find('{')]
-                        rsp = rsp.replace(substring, '')
-                        self.logger.warning(f"Missing curly brace in beginning of rsp! Stripping away beginning of broken msg: "
-                                   f"{substring}. We should have gotten a decode error previously. Can't save this one")
+                i += 1
+                self.logger.debug(f"No new bytes, attempt {i}/{retries}")
+            if i < retries:
+                time.sleep(self.serial_timeout)
 
-                    return rsp, self.rs232Codes.NO_ERR.name
-
+        if rsp:
+            self.logger.error(f"Error: Incomplete frame after {retries} tries without progress, discarding: {rsp}")
+            return -1, self.rs232Codes.SERIAL_DECODE_ERR.name
         self.logger.error(f"Error: No waiting bytes found after {retries} tries.")
         return -1, self.rs232Codes.NO_WAITING_BYTES_ERR.name
 
