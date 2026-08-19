@@ -665,13 +665,20 @@ class TestRs232Handler:
         """
         Test validation of AR-GATE response
         """
-        # Testing response is string
+        # Testing response is string or dict
         # --------------------------
-        rsp_out = [None, -1, {'dict_val': 2}, 55, [1, "2", 3]]
+        rsp_out = [None, -1, 55, [1, "2", 3]]
         for rsp_iter in rsp_out:
             rsp_val, err_code = self.rs._Rs232Handler__decode_and_validate_serial_response(rsp_iter)
             assert rsp_val == rsp_iter
             assert err_code == self.rsCodes.SERIAL_COM_ERR.name
+
+        # Already parsed dict is accepted as-is
+        # --------------------------
+        rsp_dict = {"cmd": "liftRef1", "data": "AR123456"}
+        rsp_val, err_code = self.rs._Rs232Handler__decode_and_validate_serial_response(rsp_dict)
+        assert rsp_val == rsp_dict
+        assert err_code == self.rsCodes.NO_ERR.name
 
         # Testing response can be json'd
         # --------------------------
@@ -1181,6 +1188,39 @@ class TestRs232Handler:
         assert status == -1
         assert wanted == -1
         assert other == -1
+        assert err_code == self.rsCodes.ARG_TYPE_ERR.name
+
+    def test_split_response_json_literals(self):
+        """
+        JSON literal values (null/true/false) must parse.
+        Legacy eval() raised NameError on them and dropped the buffer.
+        """
+        rsp = '{"cmd": "liftRef1", "data": null}'
+        status, wanted, other, err_code = self.rs._Rs232Handler__split_response(rsp, 'liftRef1')
+        assert err_code == self.rsCodes.NO_ERR.name
+        assert wanted == [{"cmd": "liftRef1", "data": None}]
+
+        full_rsp = '{"cmd": "liftRef1", "data": true}{"cmd": "operation", "type": 130, "data": [1, 2]}'
+        status, wanted, other, err_code = self.rs._Rs232Handler__split_response(full_rsp, 'liftRef1')
+        assert err_code == self.rsCodes.NO_ERR.name
+        assert wanted == [{"cmd": "liftRef1", "data": True}]
+        assert status == [{"cmd": "operation", "type": 130, "data": [1, 2]}]
+
+    def test_split_response_rejects_python_expressions(self):
+        """
+        Raw serial data must never be evaluated as Python code.
+        Python-only syntax (single-quoted dicts, call expressions) is rejected.
+        """
+        # Single-quoted dict: valid Python literal, invalid JSON
+        status, wanted, other, err_code = self.rs._Rs232Handler__split_response(
+            "{'cmd': 'liftRef1', 'data': 'AR123456'}", 'liftRef1')
+        assert (status, wanted, other) == (-1, -1, -1)
+        assert err_code == self.rsCodes.ARG_TYPE_ERR.name
+
+        # Expression with side effect: eval() would execute it
+        payload = '{"cmd": "liftRef1", "data": __import__("os").getcwd()}'
+        status, wanted, other, err_code = self.rs._Rs232Handler__split_response(payload, 'liftRef1')
+        assert (status, wanted, other) == (-1, -1, -1)
         assert err_code == self.rsCodes.ARG_TYPE_ERR.name
 
     def test_split_response_json_key_errors(self):

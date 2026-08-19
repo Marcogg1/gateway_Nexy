@@ -301,23 +301,25 @@ class Rs232Handler:
             self.logger.error(f"Error: cmd: {cmd} is in supported cmd's list but not actually supported, how?")
             return cmd, type_err, data_err, file_name_err, id_err, interval_err, self.rs232Codes.CMD_NOT_SUPPORTED.name
 
-    def __decode_and_validate_serial_response(self, rsp: str) -> tuple[Any, str]:
+    def __decode_and_validate_serial_response(self, rsp: str | dict) -> tuple[Any, str]:
         """
         Validate response from AR-GATE
-        :param: rsp: (string) Contains a JSON document
+        :param: rsp: (string or dict) Contains a JSON document, or an already parsed one
         :return: rsp_json: (dict) rsp as JSON object
         :return: err_code: (string)
         """
-        if not isinstance(rsp, str):
+        if isinstance(rsp, dict):
+            rsp_json: Any = rsp
+        elif isinstance(rsp, str):
+            try:
+                rsp_json = json.loads(rsp)
+            except Exception as error:
+                self.logger.error("Error: Failed to convert response to json")
+                self.logger.error(error)
+                return rsp, self.rs232Codes.JSON_ERR.name
+        else:
             self.logger.error("Error: Response not string")
             return rsp, self.rs232Codes.SERIAL_COM_ERR.name
-
-        try:
-            rsp_json: Any = json.loads(rsp)
-        except Exception as error:
-            self.logger.error("Error: Failed to convert response to json")
-            self.logger.error(error)
-            return rsp, self.rs232Codes.JSON_ERR.name
 
         if not isinstance(rsp_json, dict):
             self.logger.error(f"Error: Managed to convert response but resulting type is: {type(rsp_json)}, not dict")
@@ -576,34 +578,14 @@ class Rs232Handler:
             self.logger.error("Error: Response empty, cannot split")
             return -1, -1, -1, self.rs232Codes.ARG_TYPE_ERR.name
 
-        if len(rsp_full.split('}{')) > 1:
-            # Multiple responses found
-
-            # Reformat responses to comma-separated
-            rsp_list = rsp_full.replace('}{', '},{')
-            # Convert the responses to list
-            try:
-                rsp_list = eval(rsp_list)
-            except Exception as error:
-                self.logger.error("Failed to convert response to list.")
-                self.logger.error(error)
-                return -1, -1, -1, self.rs232Codes.ARG_TYPE_ERR.name
-        else:
-            # Convert to list for compatibility with above case where multiple responses are found
-            # Note: this assumes an enclosed pair of characters '{' and '}' which "eval" will transform to a dict.
-            # Handle if not?
-            try:
-                rsp_list = [eval(rsp_full)]
-            except Exception as error:
-                self.logger.error("Failed to convert response to list.")
-                self.logger.error(error)
-                return -1, -1, -1, self.rs232Codes.ARG_TYPE_ERR.name
-
-        # Reformat to json
-        # List conversion above reformats double-quotes to single quotes which later will break any `json.loads()`
-        rsp_json: list = []
-        for r in rsp_list:
-            rsp_json.append(json.dumps(r))
+        try:
+            # Concatenated responses become a JSON array; the replace() is a
+            # no-op for a single frame and yields a one-element list.
+            rsp_json: list = json.loads('[' + rsp_full.replace('}{', '},{') + ']')
+        except Exception as error:
+            self.logger.error("Failed to convert response to list.")
+            self.logger.error(error)
+            return -1, -1, -1, self.rs232Codes.ARG_TYPE_ERR.name
 
         # Validate each response
         err_code: str = self.rs232Codes.NO_ERR.name
