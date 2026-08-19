@@ -714,6 +714,13 @@ class TestRs232Handler:
             assert type(rsp_val) == dict
             assert err_code == self.rsCodes.JSON_KEY_ERR.name
 
+        # Test operation response without "type"
+        # --------------------------
+        rsp_val, err_code = self.rs._Rs232Handler__decode_and_validate_serial_response(
+            '{"cmd":"operation", "data":[1,2,3]}')
+        assert type(rsp_val) == dict
+        assert err_code == self.rsCodes.JSON_KEY_ERR.name
+
         # Test cmd not string
         # --------------------------
         rsp_out = ['{"cmd":1, "type":2, "data":[1,2,3]}', '{"logs": "faulty_log_str_rsp"}']
@@ -2878,7 +2885,6 @@ class TestRs232Handler:
             assert err_code == exp_code
 
     @mock.patch('os.path.exists')
-    @pytest.mark.skip(reason="File writing does not work as of now on Esseti-GW")
     def test_write_log_to_file_no_dir(self, mock_pathexists):
         """
         Test when log directory is not available and creation failed
@@ -2886,7 +2892,7 @@ class TestRs232Handler:
         data = {"key1": "value1", "key2": "value2"}
         no_err = self.rsCodes.NO_ERR.name
         mock_pathexists.return_value = False
-        self.rs._RS232Handler__set_1000_log_file_dir = mock.MagicMock(return_value=False)
+        self.rs._Rs232Handler__set_1000_file_dir = mock.MagicMock(return_value=False)
 
         self.rs.read_parameter = mock.MagicMock(return_value=['AR123456', 'name', no_err])
         _, err_code = self.rs._Rs232Handler__write_log_to_file(data)
@@ -2910,7 +2916,7 @@ class TestRs232Handler:
 
             self.rs.read_parameter = mock.MagicMock(return_value=['AR123456', 'name', no_err])
 
-            self.rs._RS232Handler__set_1000_log_file_dir = mock.MagicMock(return_value=True)
+            self.rs._Rs232Handler__set_1000_file_dir = mock.MagicMock(return_value=True)
 
             _, err_code = self.rs._Rs232Handler__write_log_to_file(data)
             assert err_code == self.rsCodes.NO_ERR.name

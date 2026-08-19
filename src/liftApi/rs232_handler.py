@@ -438,12 +438,16 @@ class Rs232Handler:
                     return rsp_json, self.rs232Codes.JSON_KEY_ERR.name
 
             else:
-                rsp_cmd = rsp_json["cmd"]
-                rsp_data = rsp_json["data"]
+                if "data" not in rsp_json:
+                    self.logger.error("Error: Missing 'data' key in json response")
+                    return rsp_json, self.rs232Codes.JSON_KEY_ERR.name
+
                 # Cmd operation contains an extra field.
-                if rsp_cmd == "operation":
-                    rsp_type = rsp_json["type"]
-                if not isinstance(rsp_cmd, str):
+                if rsp_json["cmd"] == "operation" and "type" not in rsp_json:
+                    self.logger.error("Error: Missing 'type' key in operation response")
+                    return rsp_json, self.rs232Codes.JSON_KEY_ERR.name
+
+                if not isinstance(rsp_json["cmd"], str):
                     self.logger.error("Error: 'cmd' not string")
                     return rsp_json, self.rs232Codes.JSON_VALUE_TYPE_ERR.name
 
@@ -622,8 +626,6 @@ class Rs232Handler:
         rsp_other: list = []
         for rsp in rsp_dec:
             if 'logs' in rsp:
-                rsp_wanted = rsp
-            elif 'time' in rsp:
                 rsp_wanted = rsp
             elif rsp["cmd"] == 'vfdResult':
                 if len(self.saved_vfdResult_notification) == self.max_saved_vfd_results:
