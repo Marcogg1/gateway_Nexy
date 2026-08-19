@@ -16,8 +16,46 @@ p = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(p))
 
 # pylint: disable=wrong-import-position,protected-access
-from liftApi.modbus_handler import ModBusHandler, WriteRecordConfig, LogConfig
+from liftApi.modbus_handler import (
+    ModBusHandler,
+    WriteRecordConfig,
+    LogConfig,
+    parse_int_value,
+)
 from lib.error_signals import MbCode
+
+
+class TestParseIntValue(unittest.TestCase):
+    """Tests for the shared parameter value parser."""
+
+    def test_decimal(self) -> None:
+        """Test plain decimal string."""
+        assert parse_int_value("42") == 42
+
+    def test_leading_zero_decimal(self) -> None:
+        """Test leading-zero decimals parse as decimal, not octal."""
+        assert parse_int_value("042") == 42
+
+    def test_hex_lowercase(self) -> None:
+        """Test 0x-prefixed hex string."""
+        assert parse_int_value("0x10") == 16
+
+    def test_hex_uppercase(self) -> None:
+        """Test 0X-prefixed hex string."""
+        assert parse_int_value("0X10") == 16
+
+    def test_negative(self) -> None:
+        """Test negative decimal string."""
+        assert parse_int_value("-1") == -1
+
+    def test_int_passthrough(self) -> None:
+        """Test int input passes through."""
+        assert parse_int_value(42) == 42
+
+    def test_invalid_raises_value_error(self) -> None:
+        """Test non-numeric string raises."""
+        with self.assertRaises(ValueError):
+            parse_int_value("abc")
 
 
 class TestWriteRecordConfig(unittest.TestCase):
@@ -127,6 +165,12 @@ class TestModBusHandler(unittest.TestCase):
     def test_validate_inputs_hex_string(self) -> None:
         """Test validation with hex string input."""
         ret = self.handler._validate_inputs(["0xFF"], 1)
+        assert ret[0] == 0
+        assert ret[2] == MbCode.NO_ERR.name
+
+    def test_validate_inputs_uppercase_hex_string(self) -> None:
+        """Test uppercase 0X hex validates the same as it packs."""
+        ret = self.handler._validate_inputs(["0X10"], 1)
         assert ret[0] == 0
         assert ret[2] == MbCode.NO_ERR.name
 

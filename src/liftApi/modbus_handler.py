@@ -33,6 +33,27 @@ from liftApi.modbus_file_record import ReadFileRecord, WriteFileRecord
 logger = get_logger(__name__)
 
 
+def parse_int_value(val: str | int) -> int:
+    """Parse a parameter value as int, accepting 0x-prefixed hex strings.
+
+    Single source of truth for the value grammar shared by validation,
+    register packing, and the LiftProxy cache mirror.
+
+    Args:
+        val: Value as int, decimal string, or 0x/0X-prefixed hex string.
+
+    Returns:
+        Parsed integer.
+
+    Raises:
+        ValueError: If the string is not a valid number.
+        TypeError: If the type cannot be converted.
+    """
+    if isinstance(val, str) and "0x" in val.lower():
+        return int(val, 0)
+    return int(val)
+
+
 @dataclass
 class WriteRecordConfig:
     """Modbus write record size specifications."""
@@ -592,11 +613,7 @@ class ModBusHandler:
         try:
             # Test int conversion on args
             for x in args:
-                if isinstance(x, str) and "0x" in x:
-                    # Handle hex-strings
-                    int(x, 0)
-                else:
-                    int(x)
+                parse_int_value(x)
 
         except ValueError:
             logger.error("Could not convert args to int")
@@ -1118,11 +1135,7 @@ class ModBusHandler:
             TypeError: If value type cannot be converted
         """
         try:
-            # Handle hex strings
-            if isinstance(val, str) and "0x" in val.lower():
-                val = int(val, 0)
-            else:
-                val = int(val)
+            val = parse_int_value(val)
 
         except ValueError as e:
             logger.error("Cannot pack value %s", e)
@@ -1338,11 +1351,7 @@ class ModBusHandler:
         fire_floor = 1 << (ret[0] - 1)
 
         # We know value is an int cause it was validated earlier
-        # Handle hex strings
-        if isinstance(value, str) and "0x" in value.lower():
-            value_int = int(value, 0)
-        else:
-            value_int = int(value)
+        value_int = parse_int_value(value)
 
         if (fire_floor & value_int) > 0:
             logger.error(
