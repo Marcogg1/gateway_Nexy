@@ -108,6 +108,7 @@ class TestRs232Handler:
         mock_path_exists.return_value = False
 
         self.rs = RS.Rs232Handler(ThousandLib())
+        self.rs.serial_timeout = 0  # Skip real sleeps in tests
         self.rsCodes = self.rs.rs232Codes
         assert self.rs.name == "Rs232Handler"
 
