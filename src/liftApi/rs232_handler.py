@@ -7,6 +7,7 @@ import time
 import serial
 import json
 import ast
+from collections import deque
 from typing import Type, Any
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir)))
@@ -36,7 +37,9 @@ class Rs232Handler:
         self.serial_timeout: float = 0.5
         self.polled_file_package: int = 0
         self.saved_operation_notifications: list = []
-        self.saved_vfdResult_notification: list = []
+        self.max_saved_vfd_results: int = 50
+        # deque with maxlen auto-evicts the oldest notification at the cap
+        self.saved_vfdResult_notification: deque = deque(maxlen=self.max_saved_vfd_results)
         self.door_closing_time_type: str = '135'
         self.status_type: str = '130'
 
@@ -623,6 +626,8 @@ class Rs232Handler:
             elif 'time' in rsp:
                 rsp_wanted = rsp
             elif rsp["cmd"] == 'vfdResult':
+                if len(self.saved_vfdResult_notification) == self.max_saved_vfd_results:
+                    self.logger.debug("Saved vfdResult notifications at cap, dropping oldest")
                 self.saved_vfdResult_notification.append(rsp)
             else:
                 # Get rid of type 130 (status) or 135 (door closing time) messages in buffer.
@@ -1276,13 +1281,15 @@ class Rs232Handler:
             self.logger.error(f"Error: Failed to read vfdId response")
             return -1, self.name, latest_err
 
+        response: Any = ''
         try:
-            response: Any = resp_wanted[0]["data"]
+            response = resp_wanted[0]["data"]
             vfd_err_code = resp_wanted[0]["error"]
         except Exception as e:
             self.logger.error(f"Exception vfd err: {e}")
 
-        response = response.replace(",", "-")
+        if isinstance(response, str):
+            response = response.replace(",", "-")
 
         response = -1 if not response else response
 
@@ -1355,7 +1362,7 @@ class Rs232Handler:
                 if param:
                     params.append(param[0])
 
-        self.saved_vfdResult_notification = []
+        self.saved_vfdResult_notification.clear()
         # TODO: Make a list, not set
         return set(params), err_code
 
@@ -1460,11 +1467,8 @@ class Rs232Handler:
         if new_parameters:
             updated_parameters += new_parameters
 
-        if not updated_parameters:
-            if err_code == self.rs232Codes.NO_ERR.name:
-                err_code = self.rs232Codes.NO_UPDATED_PARAMS.name
-            return "0", self.name, err_code
-
+        # Drain saved vfdResult notifications before the empty-poll return,
+        # otherwise the list grows unboundedly on quiet lifts.
         new_parameters, latest_err_code = self.get_vfd_motor_data()
 
         if latest_err_code != self.rs232Codes.NO_ERR.name:
@@ -1473,6 +1477,11 @@ class Rs232Handler:
             err_code = self.rs232Codes.PARTIAL_ERR.name
         if new_parameters:
             updated_parameters += new_parameters
+
+        if not updated_parameters:
+            if err_code == self.rs232Codes.NO_ERR.name:
+                err_code = self.rs232Codes.NO_UPDATED_PARAMS.name
+            return "0", self.name, err_code
 
         try:
             response = self.data_sep.join(str(elem) for elem in updated_parameters)

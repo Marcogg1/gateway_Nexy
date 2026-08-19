@@ -2388,6 +2388,27 @@ class TestRs232Handler:
         assert name == self.rsCodes.SOURCE.value
         assert error == self.rsCodes.NO_ERR.name
 
+    def test_set_vfd_id_1k_missing_data_key(self):
+        """
+        A vfdId response without 'data'/'error' keys must return an error code,
+        not crash with UnboundLocalError on the unset response variable.
+        """
+        self.rs._Rs232Handler__repackage_status = mock.MagicMock(return_value=
+                                                       ["0x10,0x20",
+                                                       self.rsCodes.NO_ERR.name])
+        self.rs.write_serial = mock.MagicMock(return_value=[-1, -1, -1, -1, self.rsCodes.NO_ERR.name])
+        self.rs.get_signal_from_serial_buffer = mock.MagicMock(return_value=
+                                                               [-1,
+                                                                [{"cmd": "vfdId"}],
+                                                                -1,
+                                                                self.rsCodes.NO_ERR.name])
+
+        data, name, error = self.rs.set_vfd_id_1k(["0x10-0x20"])
+
+        assert data == -1
+        assert name == self.rsCodes.SOURCE.value
+        assert error == self.rsCodes.JSON_VALUE_TYPE_ERR.name
+
     def test_get_operation_package(self):
         """
         Test all types of error and success of get_operation_package
@@ -2648,6 +2669,55 @@ class TestRs232Handler:
                     file_pack.append(curr_pack)
             assert len(file_pack) == 1
             assert file_pack[0] == file_packages[poll%no_of_file_packages]
+
+    def test_poll_lift_drains_vfd_notifications_when_no_updates(self):
+        """
+        Saved vfdResult notifications must be drained even when the poll finds
+        no other updated params. Legacy bug: the early return on empty
+        updated_parameters skipped get_vfd_motor_data, so the list grew
+        unboundedly on quiet lifts.
+        """
+        no_err = self.rs.rs232Codes.NO_ERR.name
+        dummy_value = '123'
+        dummy_file_name = '456'
+        dummy_data_value = '789'
+        self.rs.get_generic_text = mock.MagicMock(return_value=[dummy_value, self.rs.name, no_err])
+        self.rs.get_ar_version = mock.MagicMock(return_value=[dummy_value, self.rs.name, no_err])
+        self.rs.get_door_open_count = mock.MagicMock(return_value=[dummy_value, self.rs.name, no_err])
+        self.rs.read_1k_file = mock.MagicMock(
+            return_value=[dummy_value, dummy_data_value, dummy_file_name, self.rs.name, no_err])
+        self.rs.get_operation_package = mock.MagicMock(return_value=[dummy_value, self.rs.name, no_err])
+        self.rs.check_if_above_or_equal_to_versions = mock.MagicMock(return_value=True)
+        self.rs.get_updated_open_door_counter_parameters = mock.MagicMock(return_value=[[], no_err])
+        self.rs.get_notification = mock.MagicMock(return_value=[[], no_err])
+        # No package produces any updated params
+        self.rs.tl.get_updated_params = mock.MagicMock(return_value=[[], no_err])
+        self.rs.tl.update_vfd_params = mock.MagicMock(return_value=[['vfdParam'], no_err])
+
+        self.rs.saved_vfdResult_notification.append(
+            {"cmd": "vfdResult", "id": 0, "data": "0x10", "timestamp": [1, 2]})
+
+        response, name, err_code = self.rs.poll_lift(['1'])
+
+        assert len(self.rs.saved_vfdResult_notification) == 0
+        assert 'vfdParam' in str(response)
+        assert err_code == no_err
+
+    def test_split_response_vfd_notification_capped(self):
+        """
+        saved_vfdResult_notification must not grow past its cap when
+        notifications arrive faster than they are drained.
+        """
+        cap = self.rs.max_saved_vfd_results
+        old = {"cmd": "vfdResult", "id": 0, "data": "0xAA", "timestamp": [1, 2]}
+        self.rs.saved_vfdResult_notification.extend(dict(old) for _ in range(cap))
+
+        new_rsp = '{"cmd": "vfdResult", "id": 1, "data": "0xBB", "timestamp": [3, 4]}'
+        self.rs._Rs232Handler__split_response(new_rsp, 'liftRef1')
+
+        assert len(self.rs.saved_vfdResult_notification) == cap
+        # Newest notification kept, oldest dropped
+        assert self.rs.saved_vfdResult_notification[-1]["id"] == 1
 
     def test_poll_lift_failed_package(self):
         """
