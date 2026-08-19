@@ -661,6 +661,23 @@ class TestRs232Handler:
         assert interval == -1
         assert err_code == self.rsCodes.VFD_ID_ERR.name
 
+    def test_validate_inputs_logfile_bounds(self):
+        """
+        Logfile block count must be within 0-64: 0 is the legacy "firmware
+        default" sentinel (write_serial normalizes to '0' on old firmware).
+        Legacy chained comparison `0 < int(data) > 64` also let negative and
+        non-numeric values through.
+        """
+        for data_in in ['0', '1', '32', '64']:
+            _, _, data, _, _, _, err_code = self.rs._Rs232Handler__validate_serial_inputs(["logfile", data_in])
+            assert err_code == self.rsCodes.NO_ERR.name
+            assert data == data_in
+
+        for data_in in ['-5', '65', 'abc']:
+            _, _, data, _, _, _, err_code = self.rs._Rs232Handler__validate_serial_inputs(["logfile", data_in])
+            assert err_code == self.rsCodes.DATA_ERR.name
+            assert data == -1
+
     def test_decode_and_validate_response(self):
         """
         Test validation of AR-GATE response

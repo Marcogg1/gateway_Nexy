@@ -201,7 +201,12 @@ class Rs232Handler:
                 return cmd, type_err, data_err, file_name_err, id_err, interval_err, self.rs232Codes.ARGS_IN_LEN_ERR.name
             if len(args) == 2:
                 data = args[1]
-                if 0 < int(data) > 64:
+                try:
+                    # 0 is the legacy "firmware default" sentinel (see write_serial)
+                    valid_data = 0 <= int(data) <= 64
+                except ValueError:
+                    valid_data = False
+                if not valid_data:
                     self.logger.error(f"Error: Invalid data value: {data}")
                     return cmd, type_err, data_err, file_name_err, id_err, interval_err, self.rs232Codes.DATA_ERR.name
 
