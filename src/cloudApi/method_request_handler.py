@@ -286,26 +286,34 @@ class MethodRequestHandler:
         return env, 200
 
     async def _la_write_read_parameter(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
-        """Write a parameter, then read it back from the (now-updated) cache."""
+        """Write a parameter, read it back, and report the actual value.
+
+        Delegates the write→read-back→cache-sync transaction to the
+        proxy (atomic under its handler lock). On AHL the read-back is
+        a live hardware read that detects LCM-side clamping; on 1k it
+        mirrors the written value. Telemetry is pushed only when the
+        read-back verified the value; a failed read-back reports the
+        written value together with the error.
+        """
         param = self._get_int_str(payload, "parameter")
         value = self._get_str(payload, "value")
         if param is None or value is None:
             return self._arg_error()
-        status, source, code = await self._proxy.write_param(param, value)
+        status, rb_value, source, code = await self._proxy.write_read_param(param, value)
         if status != 0:
             return {
                 "ts": _now(),
                 "es": source,
                 "d": [{"p": param, "v": value, "s": str(status), "ec": code}],
             }, 200
+        if code != "NO_ERR":
+            return {
+                "ts": _now(),
+                "es": source,
+                "d": [{"p": param, "v": value, "s": "0", "ec": code}],
+            }, 200
         await self._proxy.push_param_event([int(param)])
-        rb_value, rb_code = self._proxy.get_param_value(int(param))
-        item: dict = {"p": param, "v": str(rb_value), "s": str(status)}
-        env: dict = {"ts": _now(), "d": [item]}
-        if rb_code != LpCode.NO_ERR:
-            item["ec"] = rb_code.name
-            env["es"] = LpCode.SOURCE.value
-        return env, 200
+        return {"ts": _now(), "d": [{"p": param, "v": str(rb_value), "s": "0"}]}, 200
 
     async def _la_write_ar_number(self, payload: JSONSerializable) -> tuple[JSONSerializable, int]:
         """Write the article (AR) number; report identity to the twin on success."""

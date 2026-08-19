@@ -142,7 +142,11 @@ class LiftProxy:
             return value, LpCode.COM_ERR
 
     async def read_param_live(self, param: int) -> tuple[Any, str, str]:
-        """Read a parameter live from hardware (bypassing the cache).
+        """Read a parameter through the handler.
+
+        On AHL this is a live Modbus read from the LCM. On 1k the
+        Rs232Handler answers from the ThousandLib database (the 1k
+        protocol has no on-demand hardware read).
 
         Args:
             param: Parameter number to read.
@@ -222,6 +226,44 @@ class LiftProxy:
         if status == 0:
             self._mirror_ahl_write_to_cache(param, value)
         return status, source, code
+
+    async def write_read_param(
+        self, param: str, value: str
+    ) -> tuple[int, Any, str, str]:
+        """Write a parameter, read it back, and sync the cache — atomically.
+
+        Holds the handler lock across write and read-back so the polling
+        loop cannot interleave. On AHL the read-back is a live hardware
+        read that detects LCM-side clamping of the written value; on 1k
+        the handler answers from the ThousandLib database (the protocol
+        has no live read), so the read-back mirrors the written value.
+
+        Args:
+            param: Parameter number as string.
+            value: Value to write as string.
+
+        Returns:
+            Tuple of (status, read_back_value, error_source, error_code).
+            status is the write status; read_back_value is None unless
+            the read-back succeeded.
+        """
+        if self._handler is None:
+            return -1, None, LpCode.SOURCE.value, LpCode.INIT_ERR.name
+        async with self._handler_lock:
+            status, source, code = await asyncio.to_thread(
+                self._handler.write_parameter, [param, value]
+            )
+            if status != 0:
+                return status, None, source, code
+            self._mirror_ahl_write_to_cache(param, value)
+            rb_value, rb_source, rb_code = await asyncio.to_thread(
+                self._handler.read_parameter, [param]
+            )
+        if rb_code != "NO_ERR":
+            return 0, None, rb_source, rb_code
+        if self._lib is not None:
+            self._lib.set_param(int(param), rb_value)
+        return 0, rb_value, rb_source, rb_code
 
     def _mirror_ahl_write_to_cache(self, param: str, value: str) -> None:
         """Mirror a successful AHL hardware write into the lib cache.
