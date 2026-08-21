@@ -153,5 +153,51 @@ class TestProvisionAndConnect(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_logger.warning.call_count, 1)
 
 
+class TestMainStartup(unittest.IsolatedAsyncioTestCase):
+    """Test suite for main() startup paths."""
+
+    def setUp(self):
+        """Patch all collaborators of main() with mocks."""
+        self.mock_client = MagicMock()
+        self.mock_client.shutdown = AsyncMock()
+        patches = {
+            "provision_and_connect": patch(
+                "main.provision_and_connect",
+                new_callable=AsyncMock, return_value=self.mock_client),
+            "IdleSupervisor": patch("main.IdleSupervisor"),
+            "LiftProxy": patch("main.LiftProxy"),
+            "DeviceTwinReporter": patch("main.DeviceTwinReporter"),
+            "EventSender": patch("main.EventSender"),
+            "DeviceTwinDesiredHandler": patch("main.DeviceTwinDesiredHandler"),
+            "MethodRequestHandler": patch("main.MethodRequestHandler"),
+            "HeartbeatHandler": patch("main.HeartbeatHandler"),
+            "ConnectionMonitor": patch("main.ConnectionMonitor"),
+            "build_bluetooth_server": patch("main.build_bluetooth_server"),
+            "WifiCli": patch("main.WifiCli"),
+        }
+        self.mocks = {name: p.start() for name, p in patches.items()}
+        for p in patches.values():
+            self.addCleanup(p.stop)
+
+        self.mock_proxy = AsyncMock()
+        self.mock_proxy.lift_type = LiftType.AHL
+        self.mocks["LiftProxy"].create = AsyncMock(
+            return_value=self.mock_proxy)
+        self.mocks["DeviceTwinDesiredHandler"].create = AsyncMock(
+            return_value=AsyncMock())
+        for name in ("MethodRequestHandler", "HeartbeatHandler"):
+            self.mocks[name].return_value = AsyncMock()
+        self.mocks["build_bluetooth_server"].return_value = AsyncMock()
+
+    async def test_unknown_lift_type_still_boots_cloud_stack(self):
+        """UNKNOWN lift type must not abort startup; cloud stack still runs."""
+        self.mock_proxy.lift_type = LiftType.UNKNOWN
+
+        await main.main()
+
+        self.mocks["MethodRequestHandler"].assert_called_once()
+        self.mocks["HeartbeatHandler"].assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

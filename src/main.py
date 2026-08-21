@@ -120,14 +120,17 @@ async def main(lift_sim_enabled: bool = False):
     # Provision and connect — retries indefinitely, never gives up
     device_client = await provision_and_connect()
 
-    # Initialize lift proxy (creates handlers, identifies lift type)
+    # Initialize lift proxy (creates handlers, identifies lift type).
+    # UNKNOWN lift type is not fatal: the cloud stack must still run so
+    # the gateway stays reachable; lift DDMs return INIT_ERR envelopes.
     try:
         idle_supervisor = IdleSupervisor()
         proxy = await LiftProxy.create(idle_supervisor=idle_supervisor)
         if proxy.lift_type == LiftType.UNKNOWN:
-            logger.error("Could not identify lift type, exiting")
-            return
-        logger.info("Lift type identified: %s", proxy.lift_type.value)
+            logger.warning(
+                "Could not identify lift type, continuing with cloud stack")
+        else:
+            logger.info("Lift type identified: %s", proxy.lift_type.value)
     except Exception as e:
         logger.error(f"Lift proxy initialization failed: {e}", exc_info=True)
         return
