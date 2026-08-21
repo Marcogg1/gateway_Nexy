@@ -46,6 +46,50 @@ class TestDPSClient(unittest.IsolatedAsyncioTestCase):
         mock_provisioning.create_from_x509_certificate.assert_called_once()
         client.register.assert_awaited_once()
 
+    @staticmethod
+    def _configure(mock_config):
+        mock_config.PROVISIONING_HOST = "host"
+        mock_config.DEVICE_NAME = "device"
+        mock_config.SCOPE_ID = "scope"
+        mock_config.TT_CERT = "cert.pem"
+        mock_config.TT_KEY = "key.pem"
+
+    @patch.object(DPSClient, "_shutdown_pipeline", new_callable=AsyncMock)
+    @patch("cloudApi.dps_client.ProvisioningDeviceClient")
+    @patch("cloudApi.dps_client.Config")
+    async def test_register_exception_shuts_down_pipeline(
+            self, mock_config, mock_provisioning, mock_shutdown):
+        """A register() failure tears the provisioning pipeline down."""
+        self._configure(mock_config)
+        client = MagicMock()
+        client.register = AsyncMock(side_effect=RuntimeError("dps down"))
+        mock_provisioning.create_from_x509_certificate.return_value = client
+
+        dps = DPSClient()
+        with self.assertRaises(RuntimeError):
+            await dps.create_provisioning_device()
+
+        mock_shutdown.assert_awaited_once_with(client)
+
+    @patch.object(DPSClient, "_shutdown_pipeline", new_callable=AsyncMock)
+    @patch("cloudApi.dps_client.ProvisioningDeviceClient")
+    @patch("cloudApi.dps_client.Config")
+    async def test_not_assigned_shuts_down_pipeline_and_raises(
+            self, mock_config, mock_provisioning, mock_shutdown):
+        """A non-assigned registration tears the pipeline down and raises."""
+        self._configure(mock_config)
+        register_result = SimpleNamespace(
+            status="failed", registration_state=None)
+        client = MagicMock()
+        client.register = AsyncMock(return_value=register_result)
+        mock_provisioning.create_from_x509_certificate.return_value = client
+
+        dps = DPSClient()
+        with self.assertRaises(Exception):
+            await dps.create_provisioning_device()
+
+        mock_shutdown.assert_awaited_once_with(client)
+
 
 class TestDeviceClientFactory(unittest.TestCase):
     @patch("cloudApi.device_client.IoTHubDeviceClient")
