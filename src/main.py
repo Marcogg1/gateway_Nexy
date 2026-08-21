@@ -104,6 +104,30 @@ async def provision_and_connect() -> IoTHubDeviceClient:
         await _shutdown_client(device_client)
 
 
+async def _create_desired_handler(
+        device_client: IoTHubDeviceClient) -> DeviceTwinDesiredHandler:
+    """
+    Create the desired-twin handler, retrying its twin fetch on failure.
+
+    DeviceTwinDesiredHandler.create() performs a live get_twin() round
+    trip; a transient failure there must not kill a freshly connected
+    gateway, so it retries with the same capped backoff as connect.
+
+    Returns:
+        An initialized DeviceTwinDesiredHandler.
+    """
+    backoff = CONNECT_BACKOFF_INITIAL_S
+    first_failure = True
+    while True:
+        try:
+            return await DeviceTwinDesiredHandler.create(device_client)
+        except Exception as e:
+            first_failure = _log_retry(
+                "Desired-twin init", e, backoff, first_failure)
+            await asyncio.sleep(_jittered(backoff))
+            backoff = min(backoff * 2, CONNECT_BACKOFF_MAX_S)
+
+
 async def main(lift_sim_enabled: bool = False):
     """
     Main asynchronous function to initialize and run the IoT device client.
@@ -146,7 +170,7 @@ async def main(lift_sim_enabled: bool = False):
             reporter = DeviceTwinReporter(device_client)
             send_event = EventSender(device_client, proxy.lift_type)
             lift_sim = LiftSimulator(reporter, send_event) if lift_sim_enabled else None
-            desired_handler = await DeviceTwinDesiredHandler.create(device_client)
+            desired_handler = await _create_desired_handler(device_client)
             method_handler = MethodRequestHandler(
                 device_client, proxy, reporter, desired_handler)
             heartbeat_handler = HeartbeatHandler(send_event, reporter, desired_handler)

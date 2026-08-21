@@ -153,6 +153,24 @@ class TestProvisionAndConnect(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(mock_logger.warning.call_count, 1)
 
 
+class TestCreateDesiredHandler(unittest.IsolatedAsyncioTestCase):
+    """Test suite for the desired-twin handler init retry."""
+
+    @patch("main.asyncio.sleep", new_callable=AsyncMock)
+    @patch("main.DeviceTwinDesiredHandler")
+    async def test_retries_transient_twin_failure(
+            self, mock_handler_cls, mock_sleep):
+        """A transient get_twin failure retries instead of raising."""
+        handler = MagicMock()
+        mock_handler_cls.create = AsyncMock(
+            side_effect=[RuntimeError("twin timeout"), handler])
+
+        result = await main._create_desired_handler(MagicMock())
+
+        self.assertIs(result, handler)
+        self.assertEqual(mock_handler_cls.create.await_count, 2)
+
+
 class TestMainStartup(unittest.IsolatedAsyncioTestCase):
     """Test suite for main() startup paths."""
 
