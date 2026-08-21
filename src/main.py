@@ -1,4 +1,6 @@
 import asyncio
+import random
+from azure.iot.device.aio import IoTHubDeviceClient
 from bluetoothApi.server import build_from_env as build_bluetooth_server
 from bluetoothApi.wifi_cli import WifiCli
 from cloudApi.connection_monitor import ConnectionMonitor
@@ -19,6 +21,88 @@ from lib.logging_config import setup_logging, get_logger
 setup_logging()
 logger = get_logger(__name__)
 
+# Capped exponential backoff for the startup retry loops.
+CONNECT_BACKOFF_INITIAL_S = 1
+CONNECT_BACKOFF_MAX_S = 60
+# connect() attempts per DPS registration before re-provisioning.
+CONNECT_ATTEMPTS_PER_PROVISION = 3
+
+
+def _jittered(backoff: float) -> float:
+    """Randomize a backoff delay to avoid fleet-wide retry alignment."""
+    return backoff * (0.5 + random.random())
+
+
+def _log_retry(step: str, error: Exception, backoff: float,
+               first_failure: bool) -> bool:
+    """
+    Log a startup retry — full traceback only on the first failure.
+
+    Later retries log a one-line warning so an extended outage does not
+    churn the rotating error log with identical tracebacks.
+
+    Returns:
+        False, the new value for the caller's first_failure flag.
+    """
+    if first_failure:
+        logger.error("%s failed, retrying in ~%ds: %s",
+                     step, backoff, error, exc_info=True)
+    else:
+        logger.warning("%s failed, retrying in ~%ds: %s",
+                       step, backoff, error)
+    return False
+
+
+async def _shutdown_client(device_client: IoTHubDeviceClient) -> None:
+    """Best-effort shutdown of a device client being discarded."""
+    try:
+        await device_client.shutdown()  # type: ignore[attr-defined]
+    except Exception:
+        logger.exception("Device client shutdown failed")
+
+
+async def provision_and_connect() -> IoTHubDeviceClient:
+    """
+    Provision via DPS and connect to IoT Hub, retrying until it succeeds.
+
+    Retries indefinitely with capped, jittered exponential backoff.
+    connect() is retried a few times on the same registration before a
+    full re-provision, and a discarded client is shut down so its MQTT
+    pipeline does not leak across retries.
+
+    Returns:
+        A connected IoTHubDeviceClient.
+    """
+    backoff = CONNECT_BACKOFF_INITIAL_S
+    first_failure = True
+    while True:
+        try:
+            dps = DPSClient()
+            registration_result = await dps.create_provisioning_device()
+            factory = DeviceClientFactory(registration_result)
+            device_client = factory.create_client()
+        except Exception as e:
+            first_failure = _log_retry(
+                "Provisioning", e, backoff, first_failure)
+            await asyncio.sleep(_jittered(backoff))
+            backoff = min(backoff * 2, CONNECT_BACKOFF_MAX_S)
+            continue
+
+        for _ in range(CONNECT_ATTEMPTS_PER_PROVISION):
+            try:
+                await device_client.connect()
+                logger.info("Device connected to IoT Hub")
+                return device_client
+            except Exception as e:
+                first_failure = _log_retry(
+                    "Connect", e, backoff, first_failure)
+                await asyncio.sleep(_jittered(backoff))
+                backoff = min(backoff * 2, CONNECT_BACKOFF_MAX_S)
+
+        # Connect attempts exhausted — hub assignment may be stale.
+        # Discard the client and start over from provisioning.
+        await _shutdown_client(device_client)
+
 
 async def main(lift_sim_enabled: bool = False):
     """
@@ -33,23 +117,8 @@ async def main(lift_sim_enabled: bool = False):
     
     logger.info("Starting main")
 
-    #Provisioning device client
-    try:
-        dps = DPSClient()
-        registration_result = await dps.create_provisioning_device()
-    except Exception as e:
-        logger.error(f"Provisioning failed: {e}", exc_info=True)
-        return
-
-    #Create device client
-    try:
-        factory = DeviceClientFactory(registration_result)  
-        device_client = factory.create_client()
-        await device_client.connect()
-        logger.info("Device connected to IoT Hub")
-    except Exception as e:
-        logger.error(f"Device client creation/connect failed: {e}", exc_info=True)
-        return
+    # Provision and connect — retries indefinitely, never gives up
+    device_client = await provision_and_connect()
 
     # Initialize lift proxy (creates handlers, identifies lift type)
     try:
