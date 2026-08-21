@@ -198,6 +198,35 @@ class TestMainStartup(unittest.IsolatedAsyncioTestCase):
         self.mocks["MethodRequestHandler"].assert_called_once()
         self.mocks["HeartbeatHandler"].assert_called_once()
 
+    async def test_lift_proxy_failure_raises(self):
+        """A lift proxy init failure propagates instead of returning."""
+        self.mocks["LiftProxy"].create.side_effect = RuntimeError("serial gone")
+
+        with self.assertRaises(RuntimeError):
+            await main.main()
+
+    async def test_handler_init_failure_raises(self):
+        """A handler init failure propagates instead of returning."""
+        self.mocks["MethodRequestHandler"].side_effect = RuntimeError("boom")
+
+        with self.assertRaises(RuntimeError):
+            await main.main()
+
+    async def test_fatal_failure_shuts_down_device_client(self):
+        """A fatal startup failure still shuts the connected client down."""
+        self.mocks["MethodRequestHandler"].side_effect = RuntimeError("boom")
+
+        with self.assertRaises(RuntimeError):
+            await main.main()
+
+        self.mock_client.shutdown.assert_awaited_once()
+
+    async def test_normal_run_shuts_down_device_client_on_exit(self):
+        """main() shuts the client down when its task set finishes."""
+        await main.main()
+
+        self.mock_client.shutdown.assert_awaited_once()
+
 
 if __name__ == "__main__":
     unittest.main()

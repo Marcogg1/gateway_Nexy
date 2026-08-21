@@ -120,60 +120,64 @@ async def main(lift_sim_enabled: bool = False):
     # Provision and connect — retries indefinitely, never gives up
     device_client = await provision_and_connect()
 
-    # Initialize lift proxy (creates handlers, identifies lift type).
-    # UNKNOWN lift type is not fatal: the cloud stack must still run so
-    # the gateway stays reachable; lift DDMs return INIT_ERR envelopes.
-    try:
-        idle_supervisor = IdleSupervisor()
-        proxy = await LiftProxy.create(idle_supervisor=idle_supervisor)
-        if proxy.lift_type == LiftType.UNKNOWN:
-            logger.warning(
-                "Could not identify lift type, continuing with cloud stack")
-        else:
-            logger.info("Lift type identified: %s", proxy.lift_type.value)
-    except Exception as e:
-        logger.error(f"Lift proxy initialization failed: {e}", exc_info=True)
-        return
-
-    # Init handlers
-    try:
-        reporter = DeviceTwinReporter(device_client)
-        send_event = EventSender(device_client, proxy.lift_type)
-        lift_sim = LiftSimulator(reporter, send_event) if lift_sim_enabled else None
-        desired_handler = await DeviceTwinDesiredHandler.create(device_client)
-        method_handler = MethodRequestHandler(
-            device_client, proxy, reporter, desired_handler)
-        heartbeat_handler = HeartbeatHandler(send_event, reporter, desired_handler)
-        connection_monitor = ConnectionMonitor(device_client)
-        connection_monitor.attach()
-    except Exception as e:
-        logger.error(f"Handler initialization failed: {e}", exc_info=True)
-        return
-
-    # Start BLE server for WiFi onboarding (modern protocol).
-    # BLE failure is non-fatal — lift data path must keep running even
-    # if the BLE adapter is missing or the SDK fails to load.
+    # From here on the client is connected: shut it down on any exit so
+    # a fatal error does not leave an orphaned MQTT session behind (its
+    # reconnect timer could otherwise stall interpreter exit).
     bluetooth_server = None
     try:
-        bluetooth_server = build_bluetooth_server(wifi_cli=WifiCli())
-        await bluetooth_server.start()
-    except Exception as e:
-        logger.error(f"Bluetooth server failed to start: {e}", exc_info=True)
+        # Initialize lift proxy (creates handlers, identifies lift type).
+        # UNKNOWN lift type is not fatal: the cloud stack must still run
+        # so the gateway stays reachable; lift DDMs return INIT_ERR
+        # envelopes.
+        try:
+            idle_supervisor = IdleSupervisor()
+            proxy = await LiftProxy.create(idle_supervisor=idle_supervisor)
+            if proxy.lift_type == LiftType.UNKNOWN:
+                logger.warning(
+                    "Could not identify lift type, continuing with cloud stack")
+            else:
+                logger.info("Lift type identified: %s", proxy.lift_type.value)
+        except Exception as e:
+            logger.error(f"Lift proxy initialization failed: {e}", exc_info=True)
+            raise
 
-    #Run in parallel
-    tasks = [
-        method_handler.listen_for_method(),
-        desired_handler.listen_for_desired_updates(),
-        heartbeat_handler.run(),
-        proxy.run(send_event, desired_handler, reporter),
-    ]
-    if lift_sim is not None:
-        tasks += [
-            lift_sim.report_temperature_loop(),
-            lift_sim.simulate_lift_operation(),
-            lift_sim.send_parameter_data(),
+        # Init handlers
+        try:
+            reporter = DeviceTwinReporter(device_client)
+            send_event = EventSender(device_client, proxy.lift_type)
+            lift_sim = LiftSimulator(reporter, send_event) if lift_sim_enabled else None
+            desired_handler = await DeviceTwinDesiredHandler.create(device_client)
+            method_handler = MethodRequestHandler(
+                device_client, proxy, reporter, desired_handler)
+            heartbeat_handler = HeartbeatHandler(send_event, reporter, desired_handler)
+            connection_monitor = ConnectionMonitor(device_client)
+            connection_monitor.attach()
+        except Exception as e:
+            logger.error(f"Handler initialization failed: {e}", exc_info=True)
+            raise
+
+        # Start BLE server for WiFi onboarding (modern protocol).
+        # BLE failure is non-fatal — lift data path must keep running even
+        # if the BLE adapter is missing or the SDK fails to load.
+        try:
+            bluetooth_server = build_bluetooth_server(wifi_cli=WifiCli())
+            await bluetooth_server.start()
+        except Exception as e:
+            logger.error(f"Bluetooth server failed to start: {e}", exc_info=True)
+
+        #Run in parallel
+        tasks = [
+            method_handler.listen_for_method(),
+            desired_handler.listen_for_desired_updates(),
+            heartbeat_handler.run(),
+            proxy.run(send_event, desired_handler, reporter),
         ]
-    try:
+        if lift_sim is not None:
+            tasks += [
+                lift_sim.report_temperature_loop(),
+                lift_sim.simulate_lift_operation(),
+                lift_sim.send_parameter_data(),
+            ]
         await asyncio.gather(*tasks)
     finally:
         if bluetooth_server is not None:
@@ -181,6 +185,7 @@ async def main(lift_sim_enabled: bool = False):
                 await bluetooth_server.stop()
             except Exception:
                 logger.exception("Bluetooth server stop failed")
+        await _shutdown_client(device_client)
 
 
 if __name__ == "__main__":
