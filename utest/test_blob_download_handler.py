@@ -184,6 +184,30 @@ class TestBlobDownloadHandler(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(seen)
         self.assertNotEqual(seen[0], loop_thread)
 
+    @patch("cloudApi.blob_download_handler.os.remove")
+    @patch("cloudApi.blob_download_handler.os.replace")
+    @patch("builtins.open", new_callable=mock_open)
+    @patch("cloudApi.blob_download_handler.BlobClient")
+    @patch("cloudApi.blob_download_handler.os.makedirs")
+    async def test_slow_dribble_hits_transfer_deadline(
+        self, mock_makedirs, mock_blob_client, mock_file, mock_replace, mock_remove
+    ):
+        """Test a transfer that trickles forever is aborted by the wall-clock deadline."""
+        stream = MagicMock()
+        stream.read.return_value = b"x"  # never ends
+        mock_blob = MagicMock()
+        mock_blob.download_blob.return_value = stream
+        mock_blob_client.from_blob_url.return_value = mock_blob
+
+        # Negative deadline: the first loop check is already past it. (Do NOT
+        # patch time.monotonic — the asyncio loop itself depends on it.)
+        with patch("cloudApi.blob_download_handler._TRANSFER_DEADLINE_S", -1):
+            result = await download_from_blob(self.blob_url, self.destination_path)
+
+        self.assertFalse(result)
+        mock_replace.assert_not_called()
+        mock_remove.assert_called_once_with(f"{self.destination_path}.tmp")
+
 
 if __name__ == "__main__":
     unittest.main()

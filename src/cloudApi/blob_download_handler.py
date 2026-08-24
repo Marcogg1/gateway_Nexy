@@ -4,6 +4,7 @@ import asyncio
 import logging
 import os
 import re
+import time
 from urllib.parse import urlparse, urlunparse
 
 from azure.storage.blob import BlobClient
@@ -18,6 +19,10 @@ _SAS_SIG_RE = re.compile(r"(sig=)[^&\s]+", re.IGNORECASE)
 # connection would pin the worker thread indefinitely.
 _CONNECT_TIMEOUT_S = 30
 _READ_TIMEOUT_S = 60
+# Wall-clock cap on the whole transfer: read_timeout only bounds a single
+# socket read, so a trickling connection could otherwise pin the shared
+# default-executor worker forever.
+_TRANSFER_DEADLINE_S = 600
 
 
 def _transfer_to_file(blob_url: str, tmp_path: str, max_bytes: int | None) -> int:
@@ -46,8 +51,13 @@ def _transfer_to_file(blob_url: str, tmp_path: str, max_bytes: int | None) -> in
     )
     stream = blob_client.download_blob()
     total = 0
+    deadline = time.monotonic() + _TRANSFER_DEADLINE_S
     with open(tmp_path, "wb") as f:
         while chunk := stream.read(65536):
+            if time.monotonic() > deadline:
+                raise TimeoutError(
+                    f"transfer exceeded deadline ({_TRANSFER_DEADLINE_S}s)"
+                )
             total += len(chunk)
             if max_bytes is not None and total > max_bytes:
                 raise ValueError(
