@@ -3,7 +3,7 @@
 - **Scope:** Full working-tree audit of GatewayApp (branch `EG-64-lift-data-ddms`, uncommitted changes included) — src/cloudApi, src/liftApi, src/bluetoothApi, src/lib, src/filemgmt, utest/, CI config. `.venv/` excluded.
 - **Date:** 2026-06-12
 - **Method:** 5 parallel auditors (security, implementation, functionality/legacy-parity, stability, testing) + adversarial verification of every finding. 56 verified findings deduplicated into **43 backlog items** (5 additional findings were refuted and excluded).
-- **Provenance:** Audit performed by Claude Fable 5 (multi-agent workflow). No Jira/Azure DevOps issues have been created from these findings — this backlog is the only artifact. The audit was run in advance because the included Fable usage expires on 2026-06-22.
+- **Provenance:** Audit performed by Claude Fable 5 (multi-agent workflow). The audit was run in advance because the included Fable usage expires on 2026-06-22. At audit time no Jira/Azure DevOps issues were created — that happened post-vacation: on 2026-08-18 the findings were re-verified (40 of 43 still open) and structured into Jira tickets **EG-69..EG-75** (all labeled `audit`), plus finding-comments on existing tickets EG-49/50/61/62/67. Jira is the tracking source of truth; this file remains the detailed findings reference.
 - **Counts:** P0: 4 | P1: 17 | P2: 10 | P3: 12
 - **Audience:** Implementation agent. Repo conventions apply to every fix: error-code-name-string returns, async I/O, Google docstrings, `unittest` with `setUp`/`tearDown`, type hints (`str | None` style), run `pytest utest/` and `python -m mypy .` before every commit. Do not add abstraction layers — match existing patterns.
 
