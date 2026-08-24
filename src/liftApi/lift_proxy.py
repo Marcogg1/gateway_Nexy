@@ -5,7 +5,6 @@ All lift access (cloud, WiFi, BT) goes through this proxy.
 """
 
 import asyncio
-import ctypes
 import time
 from typing import Any, cast
 
@@ -234,9 +233,13 @@ class LiftProxy:
 
         Holds the handler lock across write and read-back so the polling
         loop cannot interleave. On AHL the read-back is a live hardware
-        read that detects LCM-side clamping of the written value; on 1k
-        the handler answers from the ThousandLib database (the protocol
-        has no live read), so the read-back mirrors the written value.
+        read that detects LCM-side clamping of the written value; only a
+        verified read-back is written to the cache — on failure the
+        cache is left for the next poll cycle to correct. On 1k the
+        handler answers from the ThousandLib database (the protocol has
+        no live read), so the read-back mirrors the written value and
+        the cache is not rewritten; note the lock then spans the 1k
+        write's full read/write file transfer round trip.
 
         Args:
             param: Parameter number as string.
@@ -255,31 +258,29 @@ class LiftProxy:
             )
             if status != 0:
                 return status, None, source, code
-            self._mirror_ahl_write_to_cache(param, value)
             rb_value, rb_source, rb_code = await asyncio.to_thread(
                 self._handler.read_parameter, [param]
             )
-        if rb_code != "NO_ERR":
+        if rb_code != LpCode.NO_ERR.name:
             return 0, None, rb_source, rb_code
-        if self._lib is not None:
+        if self._lib is not None and self._lift_type == LiftType.AHL:
             self._lib.set_param(int(param), rb_value)
         return 0, rb_value, rb_source, rb_code
 
     def _mirror_ahl_write_to_cache(self, param: str, value: str) -> None:
         """Mirror a successful AHL hardware write into the lib cache.
 
-        The value is wrapped to int32 so the cache holds the same signed
-        decode the read path reports (registers are written unsigned).
-        1k is skipped: Rs232Handler already updates the ThousandLib
-        cache on write, and its values may be string-typed.
+        parse_int_value already normalizes hex bit patterns to the
+        signed decode the read path reports. 1k is skipped: Rs232Handler
+        already updates the ThousandLib cache on write, and its values
+        may be string-typed.
 
         Args:
             param: Parameter number as string.
             value: Written value as string (decimal or 0x-prefixed hex).
         """
         if self._lib is not None and self._lift_type == LiftType.AHL:
-            int_value = ctypes.c_int32(parse_int_value(value)).value
-            self._lib.set_param(int(param), int_value)
+            self._lib.set_param(int(param), parse_int_value(value))
 
     async def poll_params(self, force_read_all: bool = False) -> list[int]:
         """Poll lift hardware for changed parameters.

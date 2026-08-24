@@ -329,10 +329,10 @@ class TestWriteParam(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((status, code), (0, "NO_ERR"))
         self.mock_lib.set_param.assert_not_called()
 
-    async def test_success_unsigned_value_cached_as_int32(self):
-        """Cache must hold the signed decode the read path will report."""
+    async def test_success_unsigned_hex_cached_as_int32(self):
+        """Hex is a bit pattern: cache holds the signed decode reads report."""
         self.mock_handler.write_parameter.return_value = (0, "ModBusHandler", "NO_ERR")
-        await self.proxy.write_param("5", "4294967295")
+        await self.proxy.write_param("5", "0xFFFFFFFF")
         self.mock_lib.set_param.assert_called_once_with(5, -1)
 
 
@@ -362,31 +362,31 @@ class TestWriteReadParam(unittest.IsolatedAsyncioTestCase):
         self.mock_lib.set_param.assert_not_called()
 
     async def test_success_returns_live_value_and_syncs_cache(self):
-        """LCM clamps 7 to 5: live value is returned and cached."""
+        """LCM clamps 7 to 5: only the verified live value reaches the cache."""
         self.mock_handler.write_parameter.return_value = (0, "ModBusHandler", "NO_ERR")
         self.mock_handler.read_parameter.return_value = (5, "ModBusHandler", "NO_ERR")
         status, value, source, code = await self.proxy.write_read_param("1", "7")
         self.assertEqual((status, value, code), (0, 5, "NO_ERR"))
         self.mock_handler.read_parameter.assert_called_once_with(["1"])
-        self.mock_lib.set_param.assert_called_with(1, 5)
+        self.mock_lib.set_param.assert_called_once_with(1, 5)
 
-    async def test_read_back_failure_returns_error_keeps_written_cache(self):
-        """Read-back failure: no live value; cache keeps the written value."""
+    async def test_read_back_failure_leaves_cache_untouched(self):
+        """A verify operation must never cache an unverified value."""
         self.mock_handler.write_parameter.return_value = (0, "ModBusHandler", "NO_ERR")
         self.mock_handler.read_parameter.return_value = (-1, "ModBusHandler", "COM_ERR")
         status, value, source, code = await self.proxy.write_read_param("5", "42")
         self.assertEqual((status, value, source, code),
                          (0, None, "ModBusHandler", "COM_ERR"))
-        self.mock_lib.set_param.assert_called_once_with(5, 42)
+        self.mock_lib.set_param.assert_not_called()
 
-    async def test_1k_write_ok_no_manual_write_cache(self):
-        """1k: no manual write-mirror; cache synced only from read-back."""
+    async def test_1k_read_back_does_not_rewrite_cache(self):
+        """1k read-back comes from the ThousandLib cache — no rewrite."""
         self.proxy._lift_type = LiftType.ONE_K
         self.mock_handler.write_parameter.return_value = (0, "Rs232Handler", "NO_ERR")
         self.mock_handler.read_parameter.return_value = ("text", "Rs232Handler", "NO_ERR")
         status, value, _, code = await self.proxy.write_read_param("5", "text")
         self.assertEqual((status, value, code), (0, "text", "NO_ERR"))
-        self.mock_lib.set_param.assert_called_once_with(5, "text")
+        self.mock_lib.set_param.assert_not_called()
 
     async def test_holds_lock_across_write_and_read(self):
         """Poll loop must not interleave between write and read-back."""

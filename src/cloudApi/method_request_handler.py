@@ -306,7 +306,7 @@ class MethodRequestHandler:
                 "es": source,
                 "d": [{"p": param, "v": value, "s": str(status), "ec": code}],
             }, 200
-        if code != "NO_ERR":
+        if code != LpCode.NO_ERR.name:
             return {
                 "ts": _now(),
                 "es": source,
