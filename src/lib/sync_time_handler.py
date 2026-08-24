@@ -49,8 +49,10 @@ class SyncTimeHandler:
 
         if not (isinstance(resp_wanted, list) and resp_wanted
                 and isinstance(resp_wanted[0], dict) and 'updated' in resp_wanted[0]):
+            # Unusable response shape ≠ lift rejecting the epoch value, so
+            # report a protocol error, not EPOCH_TIME_ERR.
             logger.error("Error: malformed time response from serial buffer.")
-            return -1, self.name, self.SyncTimeCode.EPOCH_TIME_ERR.name
+            return -1, self.name, Rs232Code.JSON_KEY_ERR.name
 
         response = resp_wanted[0]['updated']
 

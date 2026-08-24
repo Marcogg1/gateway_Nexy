@@ -131,7 +131,7 @@ class TestSyncTimeRs232Failures(unittest.TestCase):
         )
         result, source, code = self.st.sync_time_rs232("1755500000", self.rs232)
         self.assertEqual(result, -1)
-        self.assertEqual(code, SyncTimeCode.EPOCH_TIME_ERR.name)
+        self.assertEqual(code, Rs232Code.JSON_KEY_ERR.name)
 
     def test_success_path_returns_response(self):
         self.rs232.get_signal_from_serial_buffer.return_value = (
