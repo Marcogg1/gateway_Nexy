@@ -139,9 +139,11 @@ cython_debug/
 
 # Certificates
 *.pem
-# Local working artifacts (specs, plans, agent config)
+# Local working artifacts (plans). Claude config under .claude/ IS committed (skills, rules);
+# only per-user settings and lock files stay local.
 docs/superpowers/
-.claude/
+.claude/settings.local.json
+.claude/*.lock
 
 # Built docker image archives
 *.tar
