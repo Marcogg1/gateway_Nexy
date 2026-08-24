@@ -1,6 +1,6 @@
 pymodbus
 pyserial
-azure-iot-device
+azure-iot-device==2.14.0
 azure-storage-blob
 pyyaml
 bless>=0.3.0

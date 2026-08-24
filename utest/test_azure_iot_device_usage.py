@@ -71,6 +71,23 @@ class TestDPSClient(unittest.IsolatedAsyncioTestCase):
 
         mock_shutdown.assert_awaited_once_with(client)
 
+    def test_sdk_private_surface_still_exists(self):
+        """Guard for the private SDK internals _shutdown_pipeline relies on.
+
+        dps_client reaches into provisioning_client._pipeline and
+        async_adapter (no public shutdown exists). If an azure-iot-device
+        bump removes them, this test fails in CI instead of the pipeline
+        leak silently returning in the field.
+        """
+        from azure.iot.device.aio import (
+            ProvisioningDeviceClient as RealProvisioningClient)
+        from azure.iot.device.common import async_adapter
+
+        self.assertTrue(hasattr(async_adapter, "emulate_async"))
+        self.assertTrue(hasattr(async_adapter, "AwaitableCallback"))
+        self.assertTrue(
+            hasattr(RealProvisioningClient(MagicMock()), "_pipeline"))
+
     @patch.object(DPSClient, "_shutdown_pipeline", new_callable=AsyncMock)
     @patch("cloudApi.dps_client.ProvisioningDeviceClient")
     @patch("cloudApi.dps_client.Config")
