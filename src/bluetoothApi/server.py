@@ -120,6 +120,7 @@ class BluetoothServer:
         self._server: Any = None
         self._status_char: Any = None
         self._tasks: set[asyncio.Task] = set()
+        self._stopping = False
 
     # --- characteristic callbacks (sync — called from SDK on the loop) ------
 
@@ -187,6 +188,12 @@ class BluetoothServer:
         Holds a reference to the task (create_task results are only weakly
         referenced by the loop) and logs any exception on completion.
         """
+        if self._stopping:
+            # A BLE write landing mid-shutdown must not spawn work after
+            # stop() has cancelled and gathered the outstanding tasks.
+            logger.warning("server stopping; dropping BLE callback")
+            coro.close()
+            return
         try:
             task = asyncio.get_running_loop().create_task(coro)
         except RuntimeError:
@@ -289,6 +296,7 @@ class BluetoothServer:
 
     async def stop(self) -> None:
         """Cancel in-flight callbacks, stop heartbeat, stop GATT server."""
+        self._stopping = True
         for task in list(self._tasks):
             task.cancel()
         if self._tasks:

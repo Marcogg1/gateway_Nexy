@@ -369,6 +369,16 @@ class TestDispatchTaskTracking(unittest.IsolatedAsyncioTestCase):
         await _drain_loop()
         self.assertEqual(len(server._tasks), 0)
 
+    async def test_dispatch_after_stop_is_dropped(self):
+        server = _make_server(_FakeCli())
+        await server.stop()
+
+        async def work():
+            raise AssertionError("must not run")
+
+        server._dispatch(work())
+        self.assertEqual(len(server._tasks), 0)
+
     async def test_failed_task_logs_exception(self):
         server = _make_server(_FakeCli())
 
