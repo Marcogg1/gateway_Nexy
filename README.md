@@ -17,7 +17,7 @@ python utils/delivery_check.py -a -x -l -u   # full CI check (tests+mypy+lint)
 python -m mypy .                       # type check only
 ```
 
-- Main branch: `dev`. Feature branches: `EG-XX-description`.
+- Main branch: `dev`. Feature branches: `AIOT-<id>-short-description` (JIRA project AIOT; legacy Esse-ti Gateway tickets `EG-XX-description`). Spec Kit pipeline per `CLAUDE.md`.
 - See `CLAUDE.md` for coding standards.
 
 ## Build & deploy the image
