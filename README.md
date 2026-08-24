@@ -78,6 +78,13 @@ authorised` at provisioning. Cert/key paths: `Config.TT_CERT` / `TT_KEY`
 On success the log prints the assigned hub:
 `Device provisioned to hub: <hub-name>` — that's the `--hub` value for tooling.
 
+> **No supervision:** nothing restarts this process today — no container
+> restart policy, no `HEALTHCHECK`, and NexyHub's crash behaviour is
+> unconfirmed (pending Esse-ti answer). A fatal exit therefore requires
+> manual intervention; DPS/connect failures retry forever instead of
+> exiting (EG-72), and an unidentified lift stays online but lift-blind
+> until restart (recovery tracked in AIOT-183).
+
 Common startup failures:
 
 | Symptom | Cause |

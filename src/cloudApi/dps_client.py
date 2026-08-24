@@ -82,7 +82,7 @@ class DPSClient:
         """
         try:
             shutdown_async = async_adapter.emulate_async(
-                provisioning_client._pipeline.shutdown)  # type: ignore[attr-defined]
+                provisioning_client._pipeline.shutdown)
             callback = async_adapter.AwaitableCallback()
             await shutdown_async(callback=callback)
             await callback.completion()

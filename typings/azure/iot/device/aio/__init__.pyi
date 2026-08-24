@@ -12,6 +12,7 @@ class IoTHubDeviceClient:
     ) -> "IoTHubDeviceClient": ...
 
     async def connect(self) -> None: ...
+    async def shutdown(self) -> None: ...
     async def get_storage_info_for_blob(self, blob_name: str) -> Dict[str, str]: ...
     async def notify_blob_upload_status(
         self,
@@ -28,6 +29,13 @@ class IoTHubDeviceClient:
     async def patch_twin_reported_properties(self, reported_properties: Dict[str, Any]) -> None: ...
 
 class ProvisioningDeviceClient:
+    # Private pipeline — reached by cloudApi.dps_client._shutdown_pipeline
+    # because the SDK has no public shutdown on this client (guard test:
+    # utest/test_azure_iot_device_usage.py).
+    _pipeline: Any
+
+    def __init__(self, pipeline: Any) -> None: ...
+
     @classmethod
     def create_from_x509_certificate(
         cls,

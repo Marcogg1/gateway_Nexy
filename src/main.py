@@ -34,15 +34,12 @@ def _jittered(backoff: float) -> float:
 
 
 def _log_retry(step: str, error: Exception, backoff: float,
-               first_failure: bool) -> bool:
+               first_failure: bool) -> None:
     """
     Log a startup retry — full traceback only on the first failure.
 
     Later retries log a one-line warning so an extended outage does not
     churn the rotating error log with identical tracebacks.
-
-    Returns:
-        False, the new value for the caller's first_failure flag.
     """
     if first_failure:
         logger.error("%s failed, retrying in ~%ds: %s",
@@ -50,13 +47,12 @@ def _log_retry(step: str, error: Exception, backoff: float,
     else:
         logger.warning("%s failed, retrying in ~%ds: %s",
                        step, backoff, error)
-    return False
 
 
 async def _shutdown_client(device_client: IoTHubDeviceClient) -> None:
     """Best-effort shutdown of a device client being discarded."""
     try:
-        await device_client.shutdown()  # type: ignore[attr-defined]
+        await device_client.shutdown()
     except Exception:
         logger.exception("Device client shutdown failed")
 
@@ -82,20 +78,28 @@ async def provision_and_connect() -> IoTHubDeviceClient:
             factory = DeviceClientFactory(registration_result)
             device_client = factory.create_client()
         except Exception as e:
-            first_failure = _log_retry(
-                "Provisioning", e, backoff, first_failure)
+            _log_retry("Provisioning", e, backoff, first_failure)
+            first_failure = False
             await asyncio.sleep(_jittered(backoff))
             backoff = min(backoff * 2, CONNECT_BACKOFF_MAX_S)
             continue
 
+        # Provisioning stage succeeded — restart the backoff schedule
+        # so a fresh connect failure is not paced by earlier DPS delays.
+        backoff = CONNECT_BACKOFF_INITIAL_S
+        first_failure = True
+
+        # Note: the sleep after the LAST failed attempt is intentional —
+        # it paces the DPS re-provision that follows, not just the next
+        # connect. Removing it would hammer DPS unpaced.
         for _ in range(CONNECT_ATTEMPTS_PER_PROVISION):
             try:
                 await device_client.connect()
                 logger.info("Device connected to IoT Hub")
                 return device_client
             except Exception as e:
-                first_failure = _log_retry(
-                    "Connect", e, backoff, first_failure)
+                _log_retry("Connect", e, backoff, first_failure)
+                first_failure = False
                 await asyncio.sleep(_jittered(backoff))
                 backoff = min(backoff * 2, CONNECT_BACKOFF_MAX_S)
 
@@ -122,8 +126,8 @@ async def _create_desired_handler(
         try:
             return await DeviceTwinDesiredHandler.create(device_client)
         except Exception as e:
-            first_failure = _log_retry(
-                "Desired-twin init", e, backoff, first_failure)
+            _log_retry("Desired-twin init", e, backoff, first_failure)
+            first_failure = False
             await asyncio.sleep(_jittered(backoff))
             backoff = min(backoff * 2, CONNECT_BACKOFF_MAX_S)
 

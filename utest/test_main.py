@@ -114,6 +114,26 @@ class TestProvisionAndConnect(unittest.IsolatedAsyncioTestCase):
         delays = [call.args[0] for call in mock_sleep.await_args_list]
         self.assertEqual(delays, [1, 2, 4, 8, 16, 32, 60, 60])
 
+    @patch("main.random.random", return_value=0.5)
+    @patch("main.asyncio.sleep", new_callable=AsyncMock)
+    @patch("main.DeviceClientFactory")
+    @patch("main.DPSClient")
+    async def test_backoff_resets_after_successful_provisioning(
+            self, mock_dps_cls, mock_factory_cls, mock_sleep, mock_random):
+        """Accumulated backoff resets once the provisioning stage succeeds."""
+        self._setup_mocks(mock_dps_cls, mock_factory_cls)
+        self.mock_dps.create_provisioning_device.side_effect = [
+            RuntimeError("dps down"),
+            RuntimeError("dps down"),
+            "registration",
+        ]
+        self.mock_client.connect.side_effect = [RuntimeError("no link"), None]
+
+        await main.provision_and_connect()
+
+        delays = [call.args[0] for call in mock_sleep.await_args_list]
+        self.assertEqual(delays, [1, 2, 1])
+
     @patch("main.random.random", side_effect=[0.0, 1.0])
     @patch("main.asyncio.sleep", new_callable=AsyncMock)
     @patch("main.DeviceClientFactory")

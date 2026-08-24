@@ -313,7 +313,8 @@ class LiftProxy:
     ) -> None:
         """Report lift type, then start onChange and daily polling loops.
 
-        Caller must ensure lift_type is identified before calling run().
+        Tolerates an UNKNOWN lift_type: the liftType report is skipped and
+        polling no-ops until identification succeeds (see AIOT-183).
 
         Args:
             event_sender: For sending telemetry events to IoT Hub.
