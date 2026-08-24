@@ -1309,6 +1309,28 @@ class TestRs232Handler:
         assert wanted == [{"cmd": "liftRef1", "data": True}]
         assert status == [{"cmd": "operation", "type": 130, "data": [1, 2]}]
 
+    def test_split_response_braces_inside_string_value(self):
+        """
+        '}{' inside a JSON string value must not be treated as a frame
+        boundary. The old '}{' -> '},{'-rewrite corrupted such values.
+        """
+        rsp = '{"cmd": "liftRef1", "data": "a}{b"}{"cmd": "operation", "type": 130, "data": [1, 2]}'
+        status, wanted, other, err_code = self.rs._Rs232Handler__split_response(rsp, 'liftRef1')
+        assert err_code == self.rsCodes.NO_ERR.name
+        assert wanted == [{"cmd": "liftRef1", "data": "a}{b"}]
+        assert status == [{"cmd": "operation", "type": 130, "data": [1, 2]}]
+
+    def test_split_response_whitespace_between_frames(self):
+        """
+        Frames separated by whitespace must parse; the '}{'-based splitting
+        missed '} {' and dropped the whole buffer.
+        """
+        rsp = '{"cmd": "liftRef1", "data": "AR123456"} {"cmd": "operation", "type": 130, "data": [1, 2]}'
+        status, wanted, other, err_code = self.rs._Rs232Handler__split_response(rsp, 'liftRef1')
+        assert err_code == self.rsCodes.NO_ERR.name
+        assert wanted == [{"cmd": "liftRef1", "data": "AR123456"}]
+        assert status == [{"cmd": "operation", "type": 130, "data": [1, 2]}]
+
     def test_split_response_rejects_python_expressions(self):
         """
         Raw serial data must never be evaluated as Python code.

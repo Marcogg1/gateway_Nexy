@@ -606,9 +606,16 @@ class Rs232Handler:
             return -1, -1, -1, self.rs232Codes.ARG_TYPE_ERR.name
 
         try:
-            # Concatenated responses become a JSON array; the replace() is a
-            # no-op for a single frame and yields a one-element list.
-            rsp_json: list = json.loads('[' + rsp_full.replace('}{', '},{') + ']')
+            # Decode concatenated frames one by one; raw_decode is exact, so
+            # '}{' inside string values and whitespace between frames are safe.
+            decoder = json.JSONDecoder()
+            rsp_json: list = []
+            idx: int = 0
+            while idx < len(rsp_full):
+                obj, idx = decoder.raw_decode(rsp_full, idx)
+                rsp_json.append(obj)
+                while idx < len(rsp_full) and rsp_full[idx].isspace():
+                    idx += 1
         except Exception as error:
             self.logger.error("Failed to convert response to list.")
             self.logger.error(error)
