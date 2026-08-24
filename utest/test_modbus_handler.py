@@ -44,6 +44,19 @@ class TestParseIntValue(unittest.TestCase):
         """Test 0X-prefixed hex string."""
         assert parse_int_value("0X10") == 16
 
+    def test_hex_negative(self) -> None:
+        """Test negative hex string."""
+        assert parse_int_value("-0x10") == -16
+
+    def test_hex_is_bit_pattern(self) -> None:
+        """Test hex above INT32_MAX normalizes to its signed 32-bit decode."""
+        assert parse_int_value("0xFFFFFFFF") == -1
+        assert parse_int_value("0xB2D05E00") == -1294967296
+
+    def test_hex_beyond_32_bits_not_wrapped(self) -> None:
+        """Test hex wider than 32 bits passes through for bounds rejection."""
+        assert parse_int_value("0x1FFFFFFFF") == 0x1FFFFFFFF
+
     def test_negative(self) -> None:
         """Test negative decimal string."""
         assert parse_int_value("-1") == -1
@@ -308,6 +321,16 @@ class TestModBusHandler(unittest.TestCase):
         """Test values below INT32_MIN are rejected, not silently wrapped."""
         with self.assertRaises(ValueError):
             self.handler._pack_value(str(-(1 << 31) - 1))
+
+    def test_pack_value_decimal_above_int32_max(self) -> None:
+        """Test decimal above INT32_MAX is rejected — it would read back negative."""
+        with self.assertRaises(ValueError):
+            self.handler._pack_value("3000000000")
+
+    def test_pack_value_hex_above_int32_max(self) -> None:
+        """Test hex above INT32_MAX packs as its 32-bit pattern."""
+        packed = self.handler._pack_value("0xB2D05E00")
+        assert packed == [0xB2D0, 0x5E00]
 
     def test_pack_value_invalid_type(self) -> None:
         """Test packing with invalid type."""

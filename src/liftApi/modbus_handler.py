@@ -37,7 +37,11 @@ def parse_int_value(val: str | int) -> int:
     """Parse a parameter value as int, accepting 0x-prefixed hex strings.
 
     Single source of truth for the value grammar shared by validation,
-    register packing, and the LiftProxy cache mirror.
+    register packing, and the LiftProxy cache mirror. A hex string
+    expresses a 32-bit register bit pattern: values above INT32_MAX are
+    normalized to the signed decode the read path reports (0xFFFFFFFF
+    parses as -1). Decimal strings express arithmetic values and are
+    returned as-is for the caller's range check.
 
     Args:
         val: Value as int, decimal string, or 0x/0X-prefixed hex string.
@@ -49,8 +53,11 @@ def parse_int_value(val: str | int) -> int:
         ValueError: If the string is not a valid number.
         TypeError: If the type cannot be converted.
     """
-    if isinstance(val, str) and "0x" in val.lower():
-        return int(val, 0)
+    if isinstance(val, str) and val.lower().startswith(("0x", "-0x")):
+        parsed = int(val, 0)
+        if 0 <= parsed < (1 << 32):
+            parsed = ctypes.c_int32(parsed).value
+        return parsed
     return int(val)
 
 
@@ -1145,7 +1152,7 @@ class ModBusHandler:
             logger.error("Cannot pack value. %s.", e)
             raise TypeError from e
 
-        if val >= (1 << 32) or val < -(1 << 31):
+        if val >= (1 << 31) or val < -(1 << 31):
             logger.error("Value out of bounds")
             raise ValueError
 
