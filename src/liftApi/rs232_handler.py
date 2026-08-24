@@ -35,6 +35,9 @@ class Rs232Handler:
         self.rs_port: str = "/dev/ttyLP6"
         self.data_sep: str = 'x'
         self.serial_timeout: float = 0.5
+        # Wall-clock budget for one serial transaction; keeps the handler lock
+        # hold time well under the 30 s cloud direct-method timeout.
+        self.serial_total_timeout: float = 10.0
         self.polled_file_package: int = 0
         self.saved_operation_notifications: list = []
         self.max_saved_vfd_results: int = 50
@@ -522,9 +525,11 @@ class Rs232Handler:
 
         return cmd, operation_type, data, self.name, err_code
 
-    def read_serial(self) -> tuple[Any, Any]:
+    def read_serial(self, deadline: float | None = None) -> tuple[Any, Any]:
         """
         Reads the serial buffer. Retries 5 times if buffer is empty.
+        :param deadline: (float) time.monotonic() timestamp after which reading
+            is abandoned. Defaults to now + serial_total_timeout.
         :return: rsp_full: (string) Everything that was read from the buffer.
         :return: err_code:
         """
@@ -532,14 +537,14 @@ class Rs232Handler:
             self.logger.error("Error: Serial not available for read")
             return -1, self.rs232Codes.SERIAL_COM_ERR.name
 
+        if deadline is None:
+            deadline = time.monotonic() + self.serial_total_timeout
+
         rsp: str = ''
         retries: int = 5
-        max_iterations: int = 50
         i: int = 0
-        iterations: int = 0
         assert self.client is not None
-        while i < retries and iterations < max_iterations:
-            iterations += 1
+        while i < retries and time.monotonic() < deadline:
             try:
                 waiting_bytes: int = self.client.in_waiting
                 if waiting_bytes > 0:
@@ -665,7 +670,7 @@ class Rs232Handler:
 
     def get_signal_from_serial_buffer(self, wanted_command: str, wanted_type: str='') -> tuple[Any, Any, Any, str]:
         """
-        Read serial buffer until wanted signal is found (or max 5s).
+        Read serial buffer until wanted signal is found (or max serial_total_timeout, ~10s).
         Always writes status to file.
         :param wanted_type: This is the signal type in command operation. Left blank for other commands.
         :return status_out: (list) Contains current status, not appended since status will always be returned as is.
@@ -674,8 +679,11 @@ class Rs232Handler:
         """
         retries: int = 5
         other_out: list = []
+        # One wall-clock budget across all retries so the caller's handler
+        # lock is never held longer than serial_total_timeout.
+        deadline: float = time.monotonic() + self.serial_total_timeout
         for i in range(retries):
-            full_resp, err_code = self.read_serial()
+            full_resp, err_code = self.read_serial(deadline)
             if err_code != self.rs232Codes.NO_ERR.name:
                 self.logger.error("Error: failed to read serial bus.")
                 return -1, -1, -1, err_code

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import sys
 import os
+import time
 import mock
 import json
 import serial
@@ -1000,6 +1001,24 @@ class TestRs232Handler:
 
         rsp_full, err_code = self.rs.read_serial()
 
+        assert rsp_full == -1
+        assert err_code == self.rsCodes.SERIAL_DECODE_ERR.name
+
+    def test_read_serial_deadline_bounds_garbage_stream(self):
+        """
+        A bus streaming continuous non-terminating data must not hold the
+        serial handler past its deadline: every chunk resets the no-progress
+        retry budget, so without a wall-clock deadline the loop could run for
+        max_iterations x serial_timeout (~25 s) while holding the handler lock.
+        """
+        self.rs._Rs232Handler__serial_available = mock.MagicMock(return_value=True)
+        self.rs.client.read = mock.MagicMock(return_value=b'garbage')
+        self.rs.client.in_waiting = _SeqInt([7] * 100000)
+
+        start = time.monotonic()
+        rsp_full, err_code = self.rs.read_serial(deadline=time.monotonic() + 0.2)
+
+        assert time.monotonic() - start < 2
         assert rsp_full == -1
         assert err_code == self.rsCodes.SERIAL_DECODE_ERR.name
 
