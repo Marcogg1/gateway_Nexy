@@ -162,7 +162,8 @@ async def main(lift_sim_enabled: bool = False):
             proxy = await LiftProxy.create(idle_supervisor=idle_supervisor)
             if proxy.lift_type == LiftType.UNKNOWN:
                 logger.warning(
-                    "Could not identify lift type, continuing with cloud stack")
+                    "Could not identify lift type, continuing with cloud stack "
+                    "— will keep probing in background")
             else:
                 logger.info("Lift type identified: %s", proxy.lift_type.value)
         except Exception as e:

@@ -22,6 +22,7 @@ class EventSender:
 
     def __init__(self, device_client: IoTHubDeviceClient, lift_type: LiftType = LiftType.UNKNOWN):
         self.device_client = device_client
+        # LiftProxy._on_identified updates this on late identification (AIOT-183).
         self.lift_type = lift_type
 
     async def send_event(self, payload: dict) -> None:

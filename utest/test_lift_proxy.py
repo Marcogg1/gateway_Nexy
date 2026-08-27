@@ -8,11 +8,16 @@ import unittest
 p = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, "src"))
 sys.path.append(p)
 
-from unittest.mock import patch, MagicMock, AsyncMock
+from unittest.mock import patch, call, MagicMock, AsyncMock
 
 from lib.error_signals import LpCode
 from liftApi.lift_identifier import LiftType
-from liftApi.lift_proxy import LiftProxy
+from liftApi.lift_proxy import (
+    DEFAULT_DAILY_INTERVAL,
+    REIDENTIFY_INTERVAL,
+    REIDENTIFY_LOG_EVERY,
+    LiftProxy,
+)
 
 
 class TestLpCode(unittest.TestCase):
@@ -151,7 +156,16 @@ class TestLiftProxyCreate(LiftProxyTestBase):
     async def test_identify_called_with_both_handlers(self, mock_identify):
         mock_identify.return_value = LiftType.AHL
         await LiftProxy.create()
-        mock_identify.assert_called_once_with(self.mock_modbus, self.mock_rs232)
+        mock_identify.assert_called_once_with(
+            self.mock_modbus, self.mock_rs232, quiet=False
+        )
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_startup_probe_is_not_quiet(self, mock_identify):
+        """The startup burst keeps full probe logging (only the loop is quiet)."""
+        mock_identify.return_value = LiftType.AHL
+        await LiftProxy.create()
+        self.assertFalse(mock_identify.await_args.kwargs["quiet"])
 
     # --- Discards unused handler ---
 
@@ -215,6 +229,314 @@ class TestLiftProxyRetry(LiftProxyTestBase):
         await LiftProxy.create()
         # Sleep is called between retries, not after the last one
         self.assertEqual(self.mock_sleep.call_count, 9)  # 10 attempts, 9 sleeps
+
+
+class TestBind(LiftProxyTestBase):
+    """Tests for the bind step that commits one handler + lib pair."""
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_ahl_bind_sets_handler_and_lib(self, mock_identify):
+        mock_identify.return_value = LiftType.AHL
+        proxy = await LiftProxy.create()
+        self.assertIs(proxy.handler, self.mock_modbus)
+        self.assertIs(proxy.lib, self.MockAhlLib.return_value)
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_ahl_bind_closes_rs232(self, mock_identify):
+        mock_identify.return_value = LiftType.AHL
+        await LiftProxy.create()
+        self.mock_rs232.close.assert_called_once_with()
+        self.mock_modbus.close.assert_not_called()
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_ahl_bind_clears_candidate_refs(self, mock_identify):
+        mock_identify.return_value = LiftType.AHL
+        proxy = await LiftProxy.create()
+        self.assertIsNone(proxy._rs232_handler)
+        self.assertIsNone(proxy._modbus_handler)
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_ahl_bind_rearms_force_read_all(self, _mock_identify):
+        proxy = LiftProxy()
+        await proxy._create_handlers()
+        proxy._force_read_all = False
+        await proxy._bind(LiftType.AHL)
+        self.assertTrue(proxy._force_read_all)
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_1k_bind_sets_handler_and_lib(self, mock_identify):
+        mock_identify.return_value = LiftType.ONE_K
+        proxy = await LiftProxy.create()
+        self.assertIs(proxy.handler, self.mock_rs232)
+        self.assertIs(proxy.lib, self.MockThousandLib.return_value)
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_1k_bind_closes_modbus(self, mock_identify):
+        mock_identify.return_value = LiftType.ONE_K
+        await LiftProxy.create()
+        self.mock_modbus.close.assert_called_once_with()
+        self.mock_rs232.close.assert_not_called()
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_1k_bind_clears_candidate_refs(self, mock_identify):
+        mock_identify.return_value = LiftType.ONE_K
+        proxy = await LiftProxy.create()
+        self.assertIsNone(proxy._modbus_handler)
+        self.assertIsNone(proxy._rs232_handler)
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_1k_bind_rearms_force_read_all(self, _mock_identify):
+        proxy = LiftProxy()
+        await proxy._create_handlers()
+        proxy._force_read_all = False
+        await proxy._bind(LiftType.ONE_K)
+        self.assertTrue(proxy._force_read_all)
+
+    # --- UNKNOWN keeps both candidates ---
+
+    @patch("liftApi.lift_proxy.asyncio.sleep", new_callable=AsyncMock)
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_unknown_keeps_both_handlers(self, mock_identify, _mock_sleep):
+        mock_identify.return_value = LiftType.UNKNOWN
+        proxy = await LiftProxy.create()
+        self.assertIs(proxy._modbus_handler, self.mock_modbus)
+        self.assertIs(proxy._rs232_handler, self.mock_rs232)
+
+    @patch("liftApi.lift_proxy.asyncio.sleep", new_callable=AsyncMock)
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_unknown_closes_no_handler(self, mock_identify, _mock_sleep):
+        mock_identify.return_value = LiftType.UNKNOWN
+        await LiftProxy.create()
+        self.mock_modbus.close.assert_not_called()
+        self.mock_rs232.close.assert_not_called()
+
+    # --- Ordering: _lift_type is published last ---
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_lift_type_set_after_handler_and_lib(self, mock_identify):
+        """_lift_type must still be UNKNOWN while the pair is being bound."""
+        mock_identify.return_value = LiftType.AHL
+        observed = {}
+
+        def record_lift_type():
+            observed["lift_type"] = proxy._lift_type
+            return MagicMock()
+
+        self.MockAhlLib.side_effect = record_lift_type
+        proxy = LiftProxy()
+        await proxy._create_handlers()
+        await proxy._try_identify()
+
+        self.assertEqual(observed["lift_type"], LiftType.UNKNOWN)
+        self.assertEqual(proxy._lift_type, LiftType.AHL)
+        self.assertIs(proxy._handler, self.mock_modbus)
+        self.assertIsNotNone(proxy._lib)
+
+    # --- A failing bind leaves the proxy untouched (FR-008) ---
+
+    def _assert_unbound(self, proxy):
+        """Assert the proxy is still UNKNOWN with both candidates alive."""
+        self.assertIsNone(proxy._handler)
+        self.assertIsNone(proxy._lib)
+        self.assertEqual(proxy._lift_type, LiftType.UNKNOWN)
+        self.assertIs(proxy._modbus_handler, self.mock_modbus)
+        self.assertIs(proxy._rs232_handler, self.mock_rs232)
+
+    async def test_polling_table_failure_leaves_state_unchanged(self):
+        """A raising table detection must not publish a half-bound pair."""
+        proxy = LiftProxy()
+        await proxy._create_handlers()
+
+        with patch.object(
+            LiftProxy,
+            "_detect_ahl_polling_table",
+            new=AsyncMock(side_effect=RuntimeError("bus")),
+        ):
+            with self.assertRaises(RuntimeError):
+                await proxy._bind(LiftType.AHL)
+
+        self._assert_unbound(proxy)
+        self.mock_rs232.close.assert_not_called()
+        self.mock_modbus.close.assert_not_called()
+
+    async def test_cancelled_loser_close_leaves_state_unchanged(self):
+        """Cancellation on the close() thread hop must not publish either."""
+        proxy = LiftProxy()
+        await proxy._create_handlers()
+
+        with patch(
+            "liftApi.lift_proxy.asyncio.to_thread",
+            new=AsyncMock(side_effect=asyncio.CancelledError),
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await proxy._bind(LiftType.ONE_K)
+
+        self._assert_unbound(proxy)
+
+    async def test_failed_bind_releases_the_handler_lock(self):
+        """The lock must not be held after a bind blows up."""
+        proxy = LiftProxy()
+        await proxy._create_handlers()
+
+        with patch.object(
+            LiftProxy,
+            "_detect_ahl_polling_table",
+            new=AsyncMock(side_effect=RuntimeError("bus")),
+        ):
+            with self.assertRaises(RuntimeError):
+                await proxy._bind(LiftType.AHL)
+
+        self.assertFalse(proxy._handler_lock.locked())
+
+
+class TestReidentifyLoop(LiftProxyTestBase):
+    """Tests for the background re-identification loop (AIOT-183 US1)."""
+
+    async def _unknown_proxy(self):
+        """Build a proxy left in the UNKNOWN state with both handlers alive."""
+        proxy = LiftProxy()
+        await proxy._create_handlers()
+        return proxy
+
+    @staticmethod
+    def _summary_calls(mock_logger):
+        """Count the periodic 'still unidentified' INFO summaries."""
+        return [
+            c for c in mock_logger.info.call_args_list
+            if "still unidentified" in c.args[0]
+        ]
+
+    @patch("liftApi.lift_proxy.asyncio.sleep", new_callable=AsyncMock)
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_binds_after_two_unknown_rounds(self, mock_identify, mock_sleep):
+        """The loop keeps probing and binds as soon as the lift answers."""
+        mock_identify.side_effect = [
+            LiftType.UNKNOWN, LiftType.UNKNOWN, LiftType.AHL
+        ]
+        proxy = await self._unknown_proxy()
+
+        await proxy._reidentify_loop()
+
+        self.assertEqual(proxy.lift_type, LiftType.AHL)
+        self.assertEqual(mock_identify.await_count, 3)
+        self.assertEqual(mock_sleep.await_count, 3)
+        mock_sleep.assert_has_awaits([call(REIDENTIFY_INTERVAL)] * 3)
+
+    @patch("liftApi.lift_proxy.asyncio.sleep", new_callable=AsyncMock)
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_probes_quietly(self, mock_identify, _mock_sleep):
+        """Background probes run quiet so failures stay below INFO (FR-010)."""
+        mock_identify.side_effect = [LiftType.UNKNOWN, LiftType.AHL]
+        proxy = await self._unknown_proxy()
+
+        await proxy._reidentify_loop()
+
+        for probe in mock_identify.await_args_list:
+            self.assertTrue(probe.kwargs["quiet"])
+
+    @patch("liftApi.lift_proxy.asyncio.sleep", new_callable=AsyncMock)
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_survives_probe_exception(self, mock_identify, _mock_sleep):
+        """A raising probe is logged and the loop keeps going."""
+        mock_identify.side_effect = [RuntimeError("bus"), LiftType.ONE_K]
+        proxy = await self._unknown_proxy()
+
+        await proxy._reidentify_loop()
+
+        self.assertEqual(proxy.lift_type, LiftType.ONE_K)
+        self.assertIs(proxy.handler, self.mock_rs232)
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_cancellation_propagates(self, mock_identify):
+        """Cancellation must not be swallowed by the exception guard."""
+        proxy = await self._unknown_proxy()
+
+        with patch(
+            "liftApi.lift_proxy.asyncio.sleep",
+            new_callable=AsyncMock,
+            side_effect=asyncio.CancelledError,
+        ):
+            with self.assertRaises(asyncio.CancelledError):
+                await proxy._reidentify_loop()
+
+        mock_identify.assert_not_awaited()
+
+    @patch("liftApi.lift_proxy.asyncio.sleep", new_callable=AsyncMock)
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_returns_immediately_when_identified(self, mock_identify, mock_sleep):
+        """An already identified proxy must not probe at all."""
+        proxy = await self._unknown_proxy()
+        proxy._lift_type = LiftType.AHL
+
+        await proxy._reidentify_loop()
+
+        mock_identify.assert_not_awaited()
+        mock_sleep.assert_not_awaited()
+
+    @patch("liftApi.lift_proxy.logger")
+    @patch("liftApi.lift_proxy.asyncio.sleep", new_callable=AsyncMock)
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_log_rate_limited(self, mock_identify, _mock_sleep, mock_logger):
+        """One WARNING on the first miss, then a summary every N attempts."""
+        unknown_rounds = 25
+        mock_identify.side_effect = (
+            [LiftType.UNKNOWN] * unknown_rounds + [LiftType.AHL]
+        )
+        proxy = await self._unknown_proxy()
+
+        await proxy._reidentify_loop()
+
+        self.assertEqual(mock_logger.warning.call_count, 1)
+        self.assertEqual(
+            len(self._summary_calls(mock_logger)),
+            unknown_rounds // REIDENTIFY_LOG_EVERY,
+        )
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_run_gathers_reidentify_loop(self, mock_identify):
+        """run() drives the loop, and polling resumes with a full read."""
+        mock_identify.side_effect = [LiftType.AHL]
+        lib = self.MockAhlLib.return_value
+        lib.poll_params = AsyncMock(return_value=[])
+        lib.DEFAULT_ON_CHANGE_PARAMS = []
+        lib.DEFAULT_DAILY_PARAMS = []
+        proxy = await self._unknown_proxy()
+        desired_handler = MagicMock()
+        desired_handler.desired_properties = {}
+        real_sleep = asyncio.sleep
+
+        async def fast_sleep(seconds):
+            """Park the daily loop, run the other two loops at full speed."""
+            if seconds >= DEFAULT_DAILY_INTERVAL:
+                await asyncio.Event().wait()
+            await real_sleep(0)
+
+        with patch("liftApi.lift_proxy.asyncio.sleep", side_effect=fast_sleep):
+            task = asyncio.create_task(
+                proxy.run(AsyncMock(), desired_handler, AsyncMock())
+            )
+            try:
+                # to_thread hops inside _bind need real time, not just yields
+                for _ in range(200):
+                    await real_sleep(0.005)
+                    if any(
+                        c.kwargs.get("force_read_all")
+                        for c in lib.poll_params.await_args_list
+                    ):
+                        break
+            finally:
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+
+        self.assertEqual(proxy.lift_type, LiftType.AHL)
+        self.assertTrue(
+            any(
+                c.kwargs.get("force_read_all")
+                for c in lib.poll_params.await_args_list
+            ),
+            "polling loop did not do a full read after late identification",
+        )
 
 
 class TestGetParamValue(unittest.TestCase):
@@ -647,6 +969,9 @@ class TestPollParams(unittest.IsolatedAsyncioTestCase):
         self.proxy = LiftProxy()
         self.proxy._lib = MagicMock()
         self.proxy._handler = MagicMock()
+        # poll_params consumes the pending cold-start flag; clear it so
+        # these tests see plain delegation (see TestPollParamsColdStartFlag)
+        self.proxy._force_read_all = False
 
     async def test_delegates_to_lib(self):
         self.proxy._lib.poll_params = AsyncMock(return_value=[5, 6])
@@ -665,6 +990,76 @@ class TestPollParams(unittest.IsolatedAsyncioTestCase):
         self.proxy._handler = None
         result = await self.proxy.poll_params()
         self.assertEqual(result, [])
+
+
+class TestPollParamsColdStartFlag(LiftProxyTestBase):
+    """poll_params() owns the pending cold-start flag (AIOT-183)."""
+
+    async def test_consumes_pending_flag(self):
+        """The pending flag forces one full read, then is cleared."""
+        proxy = LiftProxy()
+        proxy._lib = MagicMock()
+        proxy._lib.poll_params = AsyncMock(return_value=[])
+        proxy._handler = MagicMock()
+
+        await proxy.poll_params()
+        await proxy.poll_params()
+
+        first, second = proxy._lib.poll_params.await_args_list
+        self.assertTrue(first.kwargs["force_read_all"])
+        self.assertFalse(second.kwargs["force_read_all"])
+        self.assertFalse(proxy._force_read_all)
+
+    async def test_flag_stays_set_when_lib_raises(self):
+        """A raising lib call must not consume the pending full read."""
+        proxy = LiftProxy()
+        proxy._lib = MagicMock()
+        proxy._lib.poll_params = AsyncMock(side_effect=RuntimeError("bus"))
+        proxy._handler = MagicMock()
+
+        with self.assertRaises(RuntimeError):
+            await proxy.poll_params()
+
+        self.assertTrue(proxy._force_read_all)
+
+    async def test_bind_rearm_survives_queued_poll(self):
+        """A poll queued on the handler lock during _bind still reads all.
+
+        Regression: the poll used to capture the flag before _bind
+        re-armed it and then cleared the re-armed flag, losing the
+        cold-start full read after late identification. _bind() now
+        publishes the pair last, so the racing poll no-ops instead.
+        """
+        proxy = LiftProxy()
+        await proxy._create_handlers()
+        proxy._force_read_all = False       # cleared by an earlier cycle
+        lib = self.MockAhlLib.return_value
+        lib.poll_params = AsyncMock(return_value=[])
+        poll_task = None
+
+        async def to_thread_hook(func, *args):
+            """Queue a poll while _bind holds the lock, mid-bind."""
+            nonlocal poll_task
+            if poll_task is None:
+                poll_task = asyncio.create_task(proxy.poll_params())
+                for _ in range(2):
+                    await asyncio.sleep(0)  # let the poll reach the lock
+            return func(*args)
+
+        with patch("liftApi.lift_proxy.asyncio.to_thread", side_effect=to_thread_hook):
+            await proxy._bind(LiftType.AHL)
+        await poll_task
+
+        # A poll racing the bind never consumes the re-armed flag: while
+        # the pair is still unpublished it no-ops, and the first poll
+        # after the bind reads every parameter.
+        self.assertNotIn(
+            False,
+            [c.kwargs["force_read_all"] for c in lib.poll_params.await_args_list],
+            "queued poll cleared the flag _bind re-armed",
+        )
+        await proxy.poll_params()
+        self.assertTrue(lib.poll_params.await_args.kwargs["force_read_all"])
 
 
 class TestLiftProxyIdleSupervisor(LiftProxyTestBase):
@@ -922,11 +1317,76 @@ class TestRunReportsLiftType(unittest.IsolatedAsyncioTestCase):
         await self._run_one_tick()
         self.reporter.report_property.assert_awaited_once_with("gw.liftType", "1k")
 
-    async def test_skips_report_when_unknown(self):
-        """Unidentified lift must not push 'unknown' to the device twin."""
+    async def test_reports_unknown_at_start(self):
+        """An unidentified lift now reports 'unknown' instead of skipping (AIOT-183 US2)."""
         self.proxy._lift_type = LiftType.UNKNOWN
         await self._run_one_tick()
-        self.reporter.report_property.assert_not_awaited()
+        self.reporter.report_property.assert_awaited_once_with("gw.liftType", "unknown")
+
+    async def test_run_stores_reporter(self):
+        """run() keeps a reference to the reporter for later use by _on_identified()."""
+        self.proxy._lift_type = LiftType.AHL
+        await self._run_one_tick()
+        self.assertIs(self.proxy._reporter, self.reporter)
+
+    async def test_identified_at_start_reports_once_no_reidentify(self):
+        """An already-identified startup reports exactly once and never probes."""
+        self.proxy._lift_type = LiftType.AHL
+        with patch(
+            "liftApi.lift_proxy.identify_lift", new_callable=AsyncMock
+        ) as mock_identify:
+            await self._run_one_tick()
+        self.reporter.report_property.assert_awaited_once_with("gw.liftType", "AHL")
+        mock_identify.assert_not_awaited()
+
+    async def test_second_report_after_late_identification(self):
+        """After background identification, _on_identified reports the real type."""
+        self.proxy._lift_type = LiftType.UNKNOWN
+        await self._run_one_tick()
+        self.reporter.report_property.assert_awaited_once_with("gw.liftType", "unknown")
+
+        self.proxy._lift_type = LiftType.AHL
+        await self.proxy._on_identified()
+
+        self.assertEqual(self.reporter.report_property.await_count, 2)
+        self.reporter.report_property.assert_awaited_with("gw.liftType", "AHL")
+
+    async def test_on_identified_reporter_failure_does_not_undo_bind(self):
+        """A reporter that raises during late-report is logged, never raised, bind stands."""
+        self.proxy._lift_type = LiftType.AHL
+        self.proxy._reporter = self.reporter
+        self.reporter.report_property = AsyncMock(side_effect=RuntimeError("twin unavailable"))
+
+        with self.assertLogs("liftApi.lift_proxy", level="ERROR"):
+            await self.proxy._on_identified()  # must not raise
+
+        self.assertEqual(self.proxy.lift_type, LiftType.AHL)
+
+
+class TestSurfacesAfterLateIdentification(unittest.IsolatedAsyncioTestCase):
+    """Tests for AIOT-183 US3: event_sender.lift_type follows late identification."""
+
+    async def test_event_sender_lift_type_updated_on_late_identification(self):
+        """_on_identified assigns the LiftType enum (not .value) to event_sender."""
+        proxy = LiftProxy()
+        proxy._lift_type = LiftType.ONE_K
+        proxy._event_sender = MagicMock()
+        proxy._event_sender.lift_type = LiftType.UNKNOWN
+        proxy._reporter = AsyncMock()
+
+        await proxy._on_identified()
+
+        self.assertEqual(proxy._event_sender.lift_type, LiftType.ONE_K)
+        self.assertIsInstance(proxy._event_sender.lift_type, LiftType)
+
+    async def test_on_identified_without_event_sender_does_not_raise(self):
+        """_reidentify_loop can run without run() ever being called (no event_sender)."""
+        proxy = LiftProxy()
+        proxy._lift_type = LiftType.AHL
+        proxy._event_sender = None
+        proxy._reporter = None
+
+        await proxy._on_identified()  # must not raise
 
 
 class TestReadParamLive(LiftProxyTestBase):

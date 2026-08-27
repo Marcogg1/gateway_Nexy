@@ -82,8 +82,9 @@ On success the log prints the assigned hub:
 > restart policy, no `HEALTHCHECK`, and NexyHub's crash behaviour is
 > unconfirmed (pending Esse-ti answer). A fatal exit therefore requires
 > manual intervention; DPS/connect failures retry forever instead of
-> exiting (EG-72), and an unidentified lift stays online but lift-blind
-> until restart (recovery tracked in AIOT-183).
+> exiting (EG-72), and an unidentified lift stays online, reports
+> `gw.liftType: "unknown"` and keeps re-probing in the background until a
+> lift answers (AIOT-183) — no restart needed.
 
 Common startup failures:
 

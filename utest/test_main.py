@@ -231,10 +231,16 @@ class TestMainStartup(unittest.IsolatedAsyncioTestCase):
         """UNKNOWN lift type must not abort startup; cloud stack still runs."""
         self.mock_proxy.lift_type = LiftType.UNKNOWN
 
-        await main.main()
+        with self.assertLogs("main", level="WARNING") as logs:
+            await main.main()
 
         self.mocks["MethodRequestHandler"].assert_called_once()
         self.mocks["HeartbeatHandler"].assert_called_once()
+        self.assertTrue(
+            any("background" in message.lower() for message in logs.output),
+            f"UNKNOWN warning must mention background probing: {logs.output}",
+        )
+        self.mock_proxy.run.assert_called_once()
 
     async def test_lift_proxy_failure_raises(self):
         """A lift proxy init failure propagates instead of returning."""

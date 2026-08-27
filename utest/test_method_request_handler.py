@@ -189,6 +189,23 @@ class TestReadDdms(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload, {"ts": FIXED_TS, "lt": "2"})
 
+    async def test_read_lift_type_reflects_late_identification(self, _ts):
+        """la.read.lift-type reads proxy.lift_type live, with no handler
+        re-construction, so it reflects late identification automatically
+        (AIOT-183 US3, contract §3 — unchanged). Expected to pass
+        immediately: this is a regression guard, not a new behaviour.
+        """
+        proxy = MagicMock()
+        proxy.lift_type = LiftType.UNKNOWN
+        handler = make_handler(proxy=proxy)
+
+        status, payload = await run_one(handler, "la.read.lift-type", {})
+        self.assertEqual(payload["lt"], "0")
+
+        proxy.lift_type = LiftType.AHL
+        status, payload = await run_one(handler, "la.read.lift-type", {})
+        self.assertEqual(payload["lt"], "1")
+
 
 @patch("cloudApi.method_request_handler._now", return_value=FIXED_TS)
 class TestWriteDdms(unittest.IsolatedAsyncioTestCase):

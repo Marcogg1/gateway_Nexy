@@ -24,6 +24,8 @@ logger = get_logger(__name__)
 
 IDENTIFY_MAX_RETRIES = 10
 IDENTIFY_RETRY_DELAY = 5
+REIDENTIFY_INTERVAL = 5             # seconds between background probes
+REIDENTIFY_LOG_EVERY = 12           # background probes between summary logs
 DEFAULT_ON_CHANGE_INTERVAL = 5      # seconds
 DEFAULT_DAILY_INTERVAL = 86400      # 24 hours
 AHL_AR_PARAM = 96
@@ -49,6 +51,10 @@ class LiftProxy:
         self._handler_lock: asyncio.Lock = asyncio.Lock()
         self._idle_supervisor: IdleSupervisor | None = idle_supervisor
         self._force_read_all: bool = True
+        self._modbus_handler: ModBusHandler | None = None
+        self._rs232_handler: Rs232Handler | None = None
+        self._thousand_lib: ThousandLib | None = None
+        self._reporter: DeviceTwinReporter | None = None
 
     @classmethod
     async def create(
@@ -67,7 +73,21 @@ class LiftProxy:
             connected lift, or UNKNOWN if neither responds.
         """
         proxy = cls(idle_supervisor=idle_supervisor)
-        await proxy._identify_and_init()
+        await proxy._create_handlers()
+        for attempt in range(IDENTIFY_MAX_RETRIES):
+            if await proxy._try_identify():
+                return proxy
+            if attempt < IDENTIFY_MAX_RETRIES - 1:
+                logger.warning(
+                    "Identification attempt %d/%d failed, retrying in %ds",
+                    attempt + 1, IDENTIFY_MAX_RETRIES, IDENTIFY_RETRY_DELAY
+                )
+                await asyncio.sleep(IDENTIFY_RETRY_DELAY)
+        logger.error(
+            "%s: %s - Failed to identify lift after %d attempts",
+            LpCode.SOURCE.value, LpCode.IDENTIFY_ERR.name,
+            IDENTIFY_MAX_RETRIES
+        )
         return proxy
 
     @property
@@ -85,40 +105,83 @@ class LiftProxy:
         """The parameter library for the identified lift type."""
         return self._lib
 
-    async def _identify_and_init(self) -> None:
-        """Create handlers, identify lift with retries, keep matched pair."""
-        thousand_lib = ThousandLib()
-        modbus_handler = await asyncio.to_thread(ModBusHandler)
-        rs232_handler = await asyncio.to_thread(Rs232Handler, thousand_lib)
+    async def _create_handlers(self) -> None:
+        """Construct both hardware handlers and the shared 1k lib.
 
-        for attempt in range(IDENTIFY_MAX_RETRIES):
-            self._lift_type = await identify_lift(modbus_handler, rs232_handler)
-            if self._lift_type != LiftType.UNKNOWN:
-                break
-            if attempt < IDENTIFY_MAX_RETRIES - 1:
-                logger.warning(
-                    "Identification attempt %d/%d failed, retrying in %ds",
-                    attempt + 1, IDENTIFY_MAX_RETRIES, IDENTIFY_RETRY_DELAY
-                )
-                await asyncio.sleep(IDENTIFY_RETRY_DELAY)
+        Both handlers stay alive while the lift type is UNKNOWN so the
+        background re-identification loop can keep probing both buses.
+        The losing handler is closed and dereferenced by _bind().
+        """
+        self._thousand_lib = ThousandLib()
+        self._modbus_handler = await asyncio.to_thread(ModBusHandler)
+        self._rs232_handler = await asyncio.to_thread(
+            Rs232Handler, self._thousand_lib
+        )
 
-        match self._lift_type:
-            case LiftType.AHL:
-                self._handler = modbus_handler
-                ahl_lib = AhlLib()
-                self._lib = ahl_lib
-                await self._detect_ahl_polling_table(ahl_lib)
-                logger.info("LiftProxy initialized for AHL lift")
-            case LiftType.ONE_K:
-                self._handler = rs232_handler
-                self._lib = thousand_lib
-                logger.info("LiftProxy initialized for 1k lift")
-            case LiftType.UNKNOWN:
-                logger.error(
-                    "%s: %s - Failed to identify lift after %d attempts",
-                    LpCode.SOURCE.value, LpCode.IDENTIFY_ERR.name,
-                    IDENTIFY_MAX_RETRIES
-                )
+    async def _try_identify(self, *, quiet: bool = False) -> bool:
+        """Run one identification round and bind the pair on success.
+
+        Args:
+            quiet: When True, the probe demotes its per-round failure
+                logging to DEBUG. Used by the background loop so a lift
+                that never answers does not flood the log (FR-010).
+
+        Returns:
+            True if the lift was identified and the handler + lib pair is
+            bound, False if the probe returned UNKNOWN.
+        """
+        lift_type = await identify_lift(
+            self._modbus_handler, self._rs232_handler, quiet=quiet
+        )
+        if lift_type == LiftType.UNKNOWN:
+            return False
+        await self._bind(lift_type)
+        return True
+
+    async def _bind(self, lift_type: LiftType) -> None:
+        """Commit one handler + lib pair for the identified lift type.
+
+        Runs under the handler lock so no consumer observes a half-bound
+        pair. Everything that can still fail — the AHL polling-table
+        detection and closing the losing handler — happens on locals
+        first; only then are self._handler and self._lib published, the
+        candidate references dropped, the cold-start full read re-armed
+        and self._lift_type set last. That final block contains no await,
+        so a raising probe or a cancellation leaves the proxy exactly as
+        it was: UNKNOWN, with both candidates alive (FR-008).
+
+        Args:
+            lift_type: The identified lift type (AHL or ONE_K).
+        """
+        async with self._handler_lock:
+            handler: ModBusHandler | Rs232Handler | None
+            lib: AhlLib | ThousandLib | None
+            match lift_type:
+                case LiftType.AHL:
+                    handler = self._modbus_handler
+                    ahl_lib = AhlLib()
+                    lib = ahl_lib
+                    if handler is None:
+                        logger.error("_bind called for AHL without a Modbus handler")
+                    else:
+                        await self._detect_ahl_polling_table(handler, ahl_lib)
+                    if self._rs232_handler is not None:
+                        await asyncio.to_thread(self._rs232_handler.close)
+                    logger.info("LiftProxy initialized for AHL lift")
+                case LiftType.ONE_K:
+                    handler = self._rs232_handler
+                    lib = self._thousand_lib
+                    if self._modbus_handler is not None:
+                        await asyncio.to_thread(self._modbus_handler.close)
+                    logger.info("LiftProxy initialized for 1k lift")
+            # Publish the bound pair — no await below this line.
+            self._handler = handler
+            self._lib = lib
+            self._modbus_handler = None
+            self._rs232_handler = None
+            self._thousand_lib = None
+            self._force_read_all = True
+            self._lift_type = lift_type
 
     def get_param_value(self, param: int) -> tuple[int | str | None, LpCode]:
         """Read a parameter value from the lib's database.
@@ -289,11 +352,17 @@ class LiftProxy:
         hardware-specific polling strategy internally (bitmask decode
         for AHL, package-based poll for 1K).
 
+        The pending cold-start flag (self._force_read_all, re-armed by
+        _bind()) is read and cleared here, under the handler lock, so a
+        poll cannot clear a flag that _bind() re-armed while the poll was
+        queued on that same lock. A raising lib call skips the clear, so
+        the next cycle retries the full read.
+
         Args:
             force_read_all: When True, force the lib to read every
-                parameter from hardware instead of only those reported
-                as changed. Used by the first polling cycle to populate
-                the db on cold start.
+                parameter from hardware even if the pending cold-start
+                flag is already cleared. Callers that just want the
+                normal behaviour pass nothing.
 
         Returns:
             List of parameter IDs that changed since last poll.
@@ -301,9 +370,12 @@ class LiftProxy:
         if self._lib is None or self._handler is None:
             return []
         async with self._handler_lock:
-            return await self._lib.poll_params(
-                self._handler, force_read_all=force_read_all
+            force = force_read_all or self._force_read_all
+            changed = await self._lib.poll_params(
+                self._handler, force_read_all=force
             )
+            self._force_read_all = False
+        return changed
 
     async def run(
         self,
@@ -313,28 +385,86 @@ class LiftProxy:
     ) -> None:
         """Report lift type, then start onChange and daily polling loops.
 
-        Tolerates an UNKNOWN lift_type: the liftType report is skipped and
-        polling no-ops until identification succeeds (see AIOT-183).
+        Reports the current lift_type unconditionally, including "unknown"
+        when identification hasn't completed yet — polling no-ops until
+        identification succeeds and _reidentify_loop re-reports the real
+        type via _on_identified() (see AIOT-183).
 
         Args:
             event_sender: For sending telemetry events to IoT Hub.
             desired_handler: For reading param push lists and intervals
                 from device twin desired properties.
             reporter: For patching reported twin properties. Used here to
-                announce the identified lift type once at startup.
+                announce the lift type once at startup, and again by
+                _on_identified() after late identification.
         """
         self._event_sender = event_sender
         self._desired_handler = desired_handler
-        if self._lift_type == LiftType.UNKNOWN:
-            logger.warning(
-                "run() called with unidentified lift type — skipping liftType report"
-            )
-        else:
-            await reporter.report_property("gw.liftType", self._lift_type.value)
+        self._reporter = reporter
+        await reporter.report_property("gw.liftType", self._lift_type.value)
         await asyncio.gather(
             self._polling_loop(),
             self._daily_loop(),
+            self._reidentify_loop(),
         )
+
+    async def _reidentify_loop(self) -> None:
+        """Probe both buses until the lift is identified, then stop.
+
+        Runs alongside the polling loops so a lift powered up after the
+        gateway still gets identified without a restart. Returns as soon
+        as _try_identify() binds a handler + lib pair; gather() keeps the
+        other loops running. A transient probe error is logged and never
+        ends the loop, while cancellation propagates untouched.
+
+        Logging is rate limited: the probe itself runs with quiet=True so
+        its per-round failure lines drop to DEBUG, leaving one WARNING on
+        the first miss and a summary every REIDENTIFY_LOG_EVERY attempts
+        (FR-010).
+        """
+        attempts = 0
+        while self._lift_type == LiftType.UNKNOWN:
+            await asyncio.sleep(REIDENTIFY_INTERVAL)
+            attempts += 1
+            try:
+                if await self._try_identify(quiet=True):
+                    await self._on_identified()
+                    return
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Background lift identification failed")
+            else:
+                if attempts == 1:
+                    logger.warning(
+                        "Lift not identified, probing every %ds in background",
+                        REIDENTIFY_INTERVAL,
+                    )
+                elif attempts % REIDENTIFY_LOG_EVERY == 0:
+                    logger.info(
+                        "Lift still unidentified after %d background attempts",
+                        attempts,
+                    )
+
+    async def _on_identified(self) -> None:
+        """Announce a lift identified after startup.
+
+        Called once by _reidentify_loop() right after the handler + lib
+        pair is bound. Updates the telemetry lift type tag and re-reports
+        the device twin property so every cloud-facing surface agrees
+        with the newly bound lift type (see AIOT-183 US2/US3). A reporter
+        failure is logged but never raised — it must not undo the bind.
+        """
+        logger.info("Lift identified in background as %s", self._lift_type.value)
+        if self._event_sender is not None:
+            self._event_sender.lift_type = self._lift_type
+        if self._reporter is not None:
+            try:
+                await self._reporter.report_property(
+                    "gw.liftType", self._lift_type.value
+                )
+            except Exception:
+                logger.exception("Failed to report gw.liftType after late identification")
 
     async def _polling_loop(self) -> None:
         """Keep db fresh by polling hardware; push onChange params, notify supervisor.
@@ -342,13 +472,13 @@ class LiftProxy:
         On the very first cycle the lib is asked to read every parameter
         (matching legacy `m_force_read_all`) so the db is fully populated
         from a cold start and the first push carries the full onChange
-        list. The flag is cleared after the call returns; a raising call
-        leaves the flag set and the next iteration retries.
+        list. poll_params() owns that pending flag — it consumes it under
+        the handler lock and a raising call leaves it set for the next
+        iteration to retry.
         """
         while True:
             try:
-                changed = await self.poll_params(force_read_all=self._force_read_all)
-                self._force_read_all = False
+                changed = await self.poll_params()
                 if changed:
                     await self._notify_supervisor(changed)
                     push_list = self._get_param_push_list("onChange")
@@ -473,20 +603,23 @@ class LiftProxy:
             logger.debug("Could not read intervals.%s, using default %d", key, default)
         return default
 
-    async def _detect_ahl_polling_table(self, lib: AhlLib) -> None:
+    async def _detect_ahl_polling_table(
+        self, handler: ModBusHandler, lib: AhlLib
+    ) -> None:
         """Detect which AHL polling table to use by reading param 127.
 
         If param 127 is readable, the lift uses new firmware with the
         new polling table. Otherwise, fall back to the old table.
 
+        Takes the handler explicitly because it runs before _bind()
+        publishes self._handler (FR-008).
+
         Args:
+            handler: The Modbus handler to probe param 127 with.
             lib: The AhlLib instance whose polling table should be configured.
         """
-        if self._handler is None:
-            logger.error("_detect_ahl_polling_table called without handler")
-            return
         value, _, code = await asyncio.to_thread(
-            self._handler.read_parameter, ["127"]
+            handler.read_parameter, ["127"]
         )
         new_table = code == "NO_ERR"
         lib.set_polling_table(new_table)
