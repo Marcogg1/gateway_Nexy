@@ -534,5 +534,45 @@ class TestSetupConnectionReuse(unittest.TestCase):
         self.assertIs(self.handler.client, mock_cls.return_value)
 
 
+class TestModBusHandlerClose(unittest.TestCase):
+    """Tests for the idempotent close() used when the proxy drops a handler."""
+
+    def setUp(self) -> None:
+        with patch("pymodbus.client.ModbusSerialClient"), \
+             patch("filemgmt.disk_handler.DiskHandler"):
+            self.handler = ModBusHandler()
+
+    def test_close_closes_client(self) -> None:
+        """close() closes the underlying Modbus client."""
+        client = MagicMock()
+        self.handler.client = client
+        self.handler.close()
+        client.close.assert_called_once()
+
+    def test_close_clears_client_reference(self) -> None:
+        """close() drops the client reference so later calls hit the assert."""
+        self.handler.client = MagicMock()
+        self.handler.close()
+        self.assertIsNone(self.handler.client)
+
+    def test_close_is_idempotent(self) -> None:
+        """A second close() is a no-op and does not re-close the client."""
+        client = MagicMock()
+        self.handler.client = client
+        self.handler.close()
+        self.handler.close()
+        client.close.assert_called_once()
+        self.assertIsNone(self.handler.client)
+
+    def test_close_survives_client_failure(self) -> None:
+        """A raising client.close() is logged, not propagated."""
+        client = MagicMock()
+        client.close.side_effect = OSError("fd gone")
+        self.handler.client = client
+        with self.assertLogs("liftApi.modbus_handler", level="WARNING"):
+            self.handler.close()
+        self.assertIsNone(self.handler.client)
+
+
 if __name__ == "__main__":
     unittest.main()

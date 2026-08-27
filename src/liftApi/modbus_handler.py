@@ -228,6 +228,22 @@ class ModBusHandler:
         if self._modbus_link:
             self.client.connect()
 
+    def close(self) -> None:
+        """Release the Modbus serial client.
+
+        Idempotent: a second call is a no-op. Errors from the underlying
+        close are logged, never raised. The client reference is dropped so
+        any later call fails on the existing ``assert self.client is not
+        None`` guards rather than on a closed file descriptor.
+        """
+        if self.client is None:
+            return
+        try:
+            self.client.close()
+        except Exception:
+            logger.warning("Failed to close Modbus client", exc_info=True)
+        self.client = None
+
     def _test_connection(self) -> bool:
         """Test if onboard RS485 device exists.
 

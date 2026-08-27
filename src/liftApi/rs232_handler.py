@@ -71,6 +71,21 @@ class Rs232Handler:
             logger.error(error)
             self.logger.error(f"Port f{self.rs_port} not found. Running on VM?")
 
+    def close(self) -> None:
+        """Release the RS232 serial client.
+
+        Idempotent: a second call is a no-op. Errors from the underlying
+        close are logged, never raised. The client reference is dropped so
+        later calls short-circuit through the __serial_available() guard.
+        """
+        if self.client is None:
+            return
+        try:
+            self.client.close()
+        except Exception:
+            logger.warning("Failed to close RS232 client", exc_info=True)
+        self.client = None
+
     def __serial_available(self) -> bool:
         return self.client is not None
 
