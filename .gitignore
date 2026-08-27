@@ -150,3 +150,6 @@ docs/superpowers/
 
 # iot-test harness local results
 tests/iot-test/results*.json
+
+# Spec Kit machine-local feature pointer (specs/ itself stays tracked)
+.specify/feature.json
