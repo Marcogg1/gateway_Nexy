@@ -359,8 +359,14 @@ class TestBind(LiftProxyTestBase):
         self.mock_rs232.close.assert_not_called()
         self.mock_modbus.close.assert_not_called()
 
-    async def test_cancelled_loser_close_leaves_state_unchanged(self):
-        """Cancellation on the close() thread hop must not publish either."""
+    async def test_cancelled_loser_close_still_publishes_the_pair(self):
+        """Cancellation while closing the loser must leave a bound proxy.
+
+        The losing handler is closed after publication, so the worst case
+        is a leaked file descriptor - never a proxy that reports a lift
+        type it cannot serve, nor an UNKNOWN one whose candidate handler
+        has already been closed (FR-008).
+        """
         proxy = LiftProxy()
         await proxy._create_handlers()
 
@@ -371,7 +377,28 @@ class TestBind(LiftProxyTestBase):
             with self.assertRaises(asyncio.CancelledError):
                 await proxy._bind(LiftType.ONE_K)
 
-        self._assert_unbound(proxy)
+        self.assertEqual(proxy._lift_type, LiftType.ONE_K)
+        self.assertIs(proxy._handler, self.mock_rs232)
+        self.assertIsNone(proxy._modbus_handler)
+        self.assertIsNone(proxy._rs232_handler)
+        self.assertTrue(proxy._force_read_all)
+
+    async def test_loser_is_closed_after_the_pair_is_published(self):
+        """The close() hop must observe an already-bound proxy."""
+        proxy = LiftProxy()
+        await proxy._create_handlers()
+        seen = {}
+
+        def record_close():
+            seen["lift_type"] = proxy._lift_type
+            seen["handler"] = proxy._handler
+
+        self.mock_modbus.close.side_effect = record_close
+        await proxy._bind(LiftType.ONE_K)
+
+        self.mock_modbus.close.assert_called_once_with()
+        self.assertEqual(seen["lift_type"], LiftType.ONE_K)
+        self.assertIs(seen["handler"], self.mock_rs232)
 
     async def test_failed_bind_releases_the_handler_lock(self):
         """The lock must not be held after a bind blows up."""
@@ -387,6 +414,39 @@ class TestBind(LiftProxyTestBase):
                 await proxy._bind(LiftType.AHL)
 
         self.assertFalse(proxy._handler_lock.locked())
+
+
+class TestReportLiftType(LiftProxyTestBase):
+    """Tests for the bounded startup twin report (AIOT-183 US2)."""
+
+    async def test_reports_current_lift_type(self):
+        """The unknown value is reported like any other."""
+        proxy = LiftProxy()
+        reporter = MagicMock()
+        reporter.report_property = AsyncMock()
+
+        await proxy._report_lift_type(reporter)
+
+        reporter.report_property.assert_awaited_once_with(
+            "gw.liftType", "unknown"
+        )
+
+    async def test_hanging_report_times_out_instead_of_blocking(self):
+        """A twin patch that never completes must not stall startup.
+
+        The SDK's twin request/response path has no timeout of its own, so
+        without this guard run() would never reach its polling loops.
+        """
+        proxy = LiftProxy()
+        reporter = MagicMock()
+
+        async def never_completes(*_args, **_kwargs):
+            await asyncio.Event().wait()
+
+        reporter.report_property = never_completes
+
+        with patch("liftApi.lift_proxy.REPORT_TIMEOUT", 0.01):
+            await asyncio.wait_for(proxy._report_lift_type(reporter), 1)
 
 
 class TestReidentifyLoop(LiftProxyTestBase):

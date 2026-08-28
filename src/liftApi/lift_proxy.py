@@ -26,6 +26,7 @@ IDENTIFY_MAX_RETRIES = 10
 IDENTIFY_RETRY_DELAY = 5
 REIDENTIFY_INTERVAL = 5             # seconds between background probes
 REIDENTIFY_LOG_EVERY = 12           # background probes between summary logs
+REPORT_TIMEOUT = 30                 # seconds to wait for a twin patch
 DEFAULT_ON_CHANGE_INTERVAL = 5      # seconds
 DEFAULT_DAILY_INTERVAL = 86400      # 24 hours
 AHL_AR_PARAM = 96
@@ -147,8 +148,11 @@ class LiftProxy:
         first; only then are self._handler and self._lib published, the
         candidate references dropped, the cold-start full read re-armed
         and self._lift_type set last. That final block contains no await,
-        so a raising probe or a cancellation leaves the proxy exactly as
-        it was: UNKNOWN, with both candidates alive (FR-008).
+        so a raising probe or a cancellation before publication leaves the
+        proxy exactly as it was: UNKNOWN, with both candidates alive
+        (FR-008). The losing handler is closed only after publication, so a
+        cancellation on that thread hop can leak its file descriptor but
+        can never leave a half-bound proxy.
 
         Args:
             lift_type: The identified lift type (AHL or ONE_K).
@@ -156,6 +160,7 @@ class LiftProxy:
         async with self._handler_lock:
             handler: ModBusHandler | Rs232Handler | None
             lib: AhlLib | ThousandLib | None
+            loser: ModBusHandler | Rs232Handler | None = None
             match lift_type:
                 case LiftType.AHL:
                     handler = self._modbus_handler
@@ -165,14 +170,12 @@ class LiftProxy:
                         logger.error("_bind called for AHL without a Modbus handler")
                     else:
                         await self._detect_ahl_polling_table(handler, ahl_lib)
-                    if self._rs232_handler is not None:
-                        await asyncio.to_thread(self._rs232_handler.close)
+                    loser = self._rs232_handler
                     logger.info("LiftProxy initialized for AHL lift")
                 case LiftType.ONE_K:
                     handler = self._rs232_handler
                     lib = self._thousand_lib
-                    if self._modbus_handler is not None:
-                        await asyncio.to_thread(self._modbus_handler.close)
+                    loser = self._modbus_handler
                     logger.info("LiftProxy initialized for 1k lift")
             # Publish the bound pair — no await below this line.
             self._handler = handler
@@ -182,6 +185,11 @@ class LiftProxy:
             self._thousand_lib = None
             self._force_read_all = True
             self._lift_type = lift_type
+        # Release the losing bus after publication: a cancellation on this
+        # thread hop can leak its file descriptor, but can never leave a
+        # half-bound proxy behind (FR-008).
+        if loser is not None:
+            await asyncio.to_thread(loser.close)
 
     def get_param_value(self, param: int) -> tuple[int | str | None, LpCode]:
         """Read a parameter value from the lib's database.
@@ -401,12 +409,35 @@ class LiftProxy:
         self._event_sender = event_sender
         self._desired_handler = desired_handler
         self._reporter = reporter
-        await reporter.report_property("gw.liftType", self._lift_type.value)
+        await self._report_lift_type(reporter)
         await asyncio.gather(
             self._polling_loop(),
             self._daily_loop(),
             self._reidentify_loop(),
         )
+
+    async def _report_lift_type(self, reporter: DeviceTwinReporter) -> None:
+        """Report the current lift type, bounded so it cannot stall startup.
+
+        The twin request/response path has no timeout of its own, so a
+        publish whose response never arrives would block ``run()`` before
+        the polling and re-identification loops start. The timeout keeps the
+        lift data path independent of cloud state; re-sending a patch lost
+        while offline is tracked in AIOT-189.
+
+        Args:
+            reporter: Reporter used to patch the reported twin property.
+        """
+        try:
+            await asyncio.wait_for(
+                reporter.report_property("gw.liftType", self._lift_type.value),
+                REPORT_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Timed out reporting gw.liftType after %ds - continuing startup",
+                REPORT_TIMEOUT,
+            )
 
     async def _reidentify_loop(self) -> None:
         """Probe both buses until the lift is identified, then stop.
@@ -437,7 +468,7 @@ class LiftProxy:
             else:
                 if attempts == 1:
                     logger.warning(
-                        "Lift not identified, probing every %ds in background",
+                        "Lift not identified, probing in background (%ds between rounds)",
                         REIDENTIFY_INTERVAL,
                     )
                 elif attempts % REIDENTIFY_LOG_EVERY == 0:

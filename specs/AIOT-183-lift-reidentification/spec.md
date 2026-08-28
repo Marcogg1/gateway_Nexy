@@ -69,9 +69,9 @@ After a late identification, every place the gateway exposes the lift type — t
 - **Lift responds partially / intermittently** during a probe (noisy line, lift mid-boot): a failed probe must simply count as "still unknown" and be retried; it must not leave the gateway half-initialised.
 - **Serial port contention**: while unknown, both candidate serial links (RS485 for AHL, RS232 for 1000-series) remain in use for probing. Once identified, the losing link must be released so it does not hold the port or leak handles (relates to audit item AUD-033). Nothing else in the app may open those ports while probing is in progress.
 - **Lift becomes responsive during a probe cycle**: identification succeeds on the next attempt; no double-initialisation of the lift handler.
-- **Cloud disconnected while identification succeeds offline**: the lift-type report must be delivered when connectivity returns (existing twin-reporting behaviour applies; identification itself must not depend on the cloud — Principle VIII).
+- **Cloud disconnected while identification succeeds offline**: identification itself never depends on the cloud (Principle VIII), and the lift-type report is attempted as soon as the lift is identified. The existing twin reporter is fire-and-forget, so a patch attempted while offline is **lost** and the twin keeps its previous value until the next report — re-sending reported properties on reconnect is out of scope here and tracked in **AIOT-189**. Bench row T1b records the observed behaviour.
 - **Remote reboot / service-reset direct methods while unknown**: must keep working as today; re-identification runs in the background and must never block the method-handling path.
-- **Shutdown while a probe is in flight**: the background task is cancelled cleanly; no stray serial writes after the app begins shutting down.
+- **Shutdown while a probe is in flight**: the background task is cancelled cleanly and no further probe round is started. The in-flight probe runs in a worker thread, so its current transaction still completes on the bus (up to the handler's serial timeout) before the process exits; wiring handler close() into shutdown is out of scope here.
 
 ## Requirements *(mandatory)*
 
@@ -118,7 +118,7 @@ After a late identification, every place the gateway exposes the lift type — t
 
 ## Offline behaviour *(constitution Principle VIII)*
 
-Identification and re-identification are purely local (serial bus); they run regardless of cloud state. The lift-type twin report is queued/reconciled by the existing twin-reporting path on reconnect. Loss of cloud connectivity neither starts nor stops re-identification.
+Identification and re-identification are purely local (serial bus); they run regardless of cloud state, and loss of cloud connectivity neither starts nor stops re-identification. The lift-type twin report is attempted once per state change and is bounded by a timeout so a stalled patch cannot block the lift loops; it is **not** queued or retried on reconnect today — that gap is **AIOT-189**.
 
 ## Assumptions
 

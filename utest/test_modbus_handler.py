@@ -576,3 +576,13 @@ class TestModBusHandlerClose(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_close_marks_the_link_down(self):
+        """A closed handler must not silently reopen the exclusive port.
+
+        check_modbus_connection reopens the port whenever _modbus_link
+        flips back to True, so close() has to clear it (AIOT-183).
+        """
+        self.handler._modbus_link = True
+        self.handler.close()
+        assert self.handler._modbus_link is False

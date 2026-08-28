@@ -23,7 +23,7 @@ No persisted data. The model is the in-memory state of `LiftProxy` and its cloud
 |---|---|---|
 | probing → identified | `identify_lift()` returns AHL/1k | `_handler`,`_lib` set; AHL polling table detected; loser handler `close()`d and dereferenced; `_force_read_all = True`; `_lift_type` set; then (outside lock) `event_sender.lift_type` updated, `gw.liftType` reported, INFO log |
 | probing → probing | `identify_lift()` returns UNKNOWN or raises | no state change; rate-limited log |
-| any → (cancelled) | task cancellation on shutdown | loop exits; no serial write after cancellation point |
+| any → (cancelled) | task cancellation on shutdown | loop exits and starts no further round; a probe already running in a worker thread finishes its current transaction |
 
 ## `LiftProxy` fields
 
@@ -36,7 +36,7 @@ No persisted data. The model is the in-memory state of `LiftProxy` and its cloud
 | `_rs232_handler` **(new)** | `Rs232Handler \| None` | created in `create()`, cleared at bind | candidate while UNKNOWN |
 | `_thousand_lib` **(new)** | `ThousandLib \| None` | created in `create()`; becomes `_lib` on 1k, dropped on AHL | shared with `Rs232Handler` |
 | `_reporter` **(new)** | `DeviceTwinReporter \| None` | set in `run()` | needed for late twin report |
-| `_force_read_all` | `bool` | re-armed at bind | cold-start full read |
+| `_force_read_all` | `bool` | re-armed at bind | cold-start full read; read and cleared by `poll_params()` under `_handler_lock` |
 | `_handler_lock` | `asyncio.Lock` | unchanged | guards bind + all hardware I/O |
 
 Constants (module level): `REIDENTIFY_INTERVAL = 5` (s), `REIDENTIFY_LOG_EVERY = 12` (attempts between summary logs). Existing `IDENTIFY_MAX_RETRIES = 10`, `IDENTIFY_RETRY_DELAY = 5` unchanged.

@@ -11,9 +11,14 @@ cycle.
 
 import asyncio
 from enum import Enum, unique
+from typing import TYPE_CHECKING
 
 from lib.error_signals import MbCode, Rs232Code
 from lib.logging_config import get_logger
+
+if TYPE_CHECKING:  # pragma: no cover - avoids an import cycle
+    from liftApi.modbus_handler import ModBusHandler
+    from liftApi.rs232_handler import Rs232Handler
 
 logger = get_logger(__name__)
 
@@ -28,7 +33,12 @@ class LiftType(Enum):
     ONE_K = "1k"
 
 
-async def identify_lift(modbus_handler, rs232_handler, *, quiet: bool = False) -> LiftType:
+async def identify_lift(
+    modbus_handler: "ModBusHandler | None",
+    rs232_handler: "Rs232Handler | None",
+    *,
+    quiet: bool = False,
+) -> LiftType:
     """Probe handlers to determine which lift type is connected.
 
     Tries ModbusHandler first (AHL lift). If that fails, tries
