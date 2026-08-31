@@ -94,7 +94,7 @@ utest/
 1. **Keep handlers while UNKNOWN.** `_identify_and_init()` becomes:
    - `_create_handlers()` — constructs `ThousandLib`, `ModBusHandler`, `Rs232Handler` once (as today, via `asyncio.to_thread`) and stores them as `self._modbus_handler`, `self._rs232_handler`, `self._thousand_lib`.
    - `_try_identify() -> bool` — one `identify_lift()` round; on success calls `_bind(lift_type)` and returns `True`.
-   - `_bind(lift_type)` — the existing `match` arms: set `_handler`/`_lib`, run `_detect_ahl_polling_table` for AHL, **close the losing handler** (`modbus_handler.close()` / `rs232_handler.close()`), drop the loser references, set `_force_read_all = True`, set `self._lift_type` last. Executed under `_handler_lock` so DDMs never observe a half-bound pair.
+   - `_bind(lift_type)` — the existing `match` arms: set `_handler`/`_lib`, run `_detect_ahl_polling_table` for AHL, **close the losing handler** (`modbus_handler.close()` / `rs232_handler.close()`), drop the loser references, set `_force_read_all = True`, set `self._lift_type` last. Executed under `_handler_lock` so DDMs never observe a half-bound pair. A missing handler or lib (defensive — unreachable while candidates are cleared only by a successful bind) logs and **returns before the publish block** rather than committing `_handler = None` under a real `_lift_type`.
    - `create()` keeps the startup burst (`IDENTIFY_MAX_RETRIES` × `IDENTIFY_RETRY_DELAY`, unchanged constants, unchanged tests) using `_try_identify()`; on UNKNOWN it now **retains** both handlers instead of dropping them.
 2. **Background loop.** `run()` gathers `_reidentify_loop()` alongside `_polling_loop()` / `_daily_loop()`:
    ```
@@ -108,13 +108,13 @@ utest/
    ```
    Log discipline: first failure at WARNING, then one INFO summary every `REIDENTIFY_LOG_EVERY = 12` attempts (~1 min at 5 s); success at INFO. The loop simply returns once identified (gather keeps the other loops alive).
 2b. **Bounded twin report.** `run()` reports `gw.liftType` through `_report_lift_type()`, which wraps the patch in `asyncio.wait_for(..., REPORT_TIMEOUT)`. The SDK's twin request/response path has no timeout of its own, so an unanswered patch would otherwise block `run()` before the polling and re-identification loops start.
-3. **`_on_identified()`** — `event_sender.lift_type = self._lift_type` (telemetry tag), `await reporter.report_property("gw.liftType", self._lift_type.value)`, log once. `run()` stores `self._reporter` for this.
+3. **`_on_identified()`** — `event_sender.lift_type = self._lift_type` (telemetry tag), `await self._report_lift_type(self._reporter)`, log once. `run()` stores `self._reporter` for this. The late report goes through the same `_report_lift_type()` wrapper as the startup one (2b) so a twin patch that is never answered cannot park `_reidentify_loop` forever.
 4. **Twin report on UNKNOWN.** `run()` always reports `gw.liftType` = `self._lift_type.value` (`"unknown"` included). Remove the skip branch + its warning.
 5. **Startup-time flag bug.** `_polling_loop` cleared `_force_read_all` after an empty poll even when `_lib is None`, and a poll already blocked on the handler lock could clear the flag `_bind` had just re-armed. Ownership therefore moves into `poll_params()`: it reads and clears the flag **inside `_handler_lock`** (the same lock `_bind` re-arms it under) and only after the lib call returns, so a raising sweep retries next cycle. `_polling_loop` calls `poll_params()` with no argument; the `force_read_all` parameter stays for API compatibility.
 
 ### Handler `close()` (`modbus_handler.py`, `rs232_handler.py`)
 
-`def close(self) -> None` — idempotent, logs close errors instead of raising, and sets `self.client = None` in both handlers so any later call fails on the existing `assert self.client is not None` / `__serial_available()` guards rather than on a closed fd. `ModBusHandler.close()` also clears `_modbus_link` so `check_modbus_connection` cannot silently reopen the exclusive port on a closed handler. Not wired into shutdown (`main()` finally) — out of scope (EG-61 territory).
+`def close(self) -> None` — idempotent, logs close errors instead of raising, and sets `self.client = None` in both handlers so any later call fails on the existing `assert self.client is not None` / `__serial_available()` guards rather than on a closed fd. `ModBusHandler.close()` also sets a `_closed` flag that `check_modbus_connection` checks **first**, returning `LINK_ERR` so a closed handler is inert. Clearing `_modbus_link` alone would do the opposite and *arm* a reopen: the decorator reads a false link as "setup needed" and calls `_setup_connection()`, rebuilding the client on the exclusive port. Not wired into shutdown (`main()` finally) — out of scope (EG-61 territory).
 
 ### Untouched by design
 
