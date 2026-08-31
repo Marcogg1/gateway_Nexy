@@ -573,16 +573,31 @@ class TestModBusHandlerClose(unittest.TestCase):
             self.handler.close()
         self.assertIsNone(self.handler.client)
 
+    def test_close_marks_the_handler_closed(self) -> None:
+        """close() marks the handler closed and the link down."""
+        self.handler.client = MagicMock()
+        self.handler._modbus_link = True
+        self.handler.close()
+        self.assertTrue(self.handler._closed)
+        self.assertFalse(self.handler._modbus_link)
+
+    def test_closed_handler_does_not_reopen_the_port(self) -> None:
+        """A decorated call on a closed handler fails instead of reconnecting.
+
+        check_modbus_connection treats a False _modbus_link as "setup
+        needed", so without the _closed check close() would arm a reopen of
+        the exclusive port on the next call (AIOT-183).
+        """
+        self.handler.client = MagicMock()
+        self.handler.close()
+        with patch.object(self.handler, "_setup_connection") as setup:
+            with self.assertLogs("liftApi.modbus_handler", level="ERROR"):
+                value, source, err = self.handler.read_parameter(["77"])
+        setup.assert_not_called()
+        self.assertEqual(value, -1)
+        self.assertEqual(source, self.handler.name)
+        self.assertEqual(err, MbCode.LINK_ERR.name)
+
 
 if __name__ == "__main__":
     unittest.main()
-
-    def test_close_marks_the_link_down(self):
-        """A closed handler must not silently reopen the exclusive port.
-
-        check_modbus_connection reopens the port whenever _modbus_link
-        flips back to True, so close() has to clear it (AIOT-183).
-        """
-        self.handler._modbus_link = True
-        self.handler.close()
-        assert self.handler._modbus_link is False

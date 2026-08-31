@@ -135,6 +135,10 @@ def check_modbus_connection(
     ) -> tuple[Any, str, str]:
         """Check connection and execute method."""
         # pylint: disable=protected-access
+        if self._closed:
+            logger.error("Modbus handler is closed, refusing to reopen the port")
+            return -1, self.name, MbCode.LINK_ERR.name
+
         if not self._test_connection():
             logger.error("Modbus connection not available")
             return -1, self.name, MbCode.LINK_ERR.name
@@ -161,6 +165,7 @@ class ModBusHandler:
     def __init__(self) -> None:
         """Initialize Modbus handler and establish connection."""
         self._modbus_link = False
+        self._closed = False
         self.name = MbCode.SOURCE.value
         self.rs_port = "/dev/ttyLP1"
         self.lcm_address = 0x0A
@@ -231,13 +236,19 @@ class ModBusHandler:
     def close(self) -> None:
         """Release the Modbus serial client.
 
-        Idempotent: a second call is a no-op. Errors from the underlying
-        close are logged, never raised. The client reference is dropped and
-        the link marked down so ``check_modbus_connection`` cannot silently
-        reopen the exclusive port on a closed handler; any call that still
-        reaches the client fails on the existing ``assert self.client is not
-        None`` guards rather than on a closed file descriptor.
+        Idempotent and terminal: a second call is a no-op, and a closed
+        handler is never reopened. Errors from the underlying close are
+        logged, never raised.
+
+        ``_modbus_link`` alone cannot express "closed": the
+        ``check_modbus_connection`` decorator treats a False link as
+        "setup needed" and would rebuild the client, reopening the
+        exclusive port. The separate ``_closed`` flag is therefore checked
+        first by the decorator, which returns ``LINK_ERR`` instead (AIOT-183).
         """
+        if self._closed:
+            return
+        self._closed = True
         if self.client is None:
             return
         try:
