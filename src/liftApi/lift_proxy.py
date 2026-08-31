@@ -143,40 +143,47 @@ class LiftProxy:
         """Commit one handler + lib pair for the identified lift type.
 
         Runs under the handler lock so no consumer observes a half-bound
-        pair. Everything that can still fail — the AHL polling-table
-        detection and closing the losing handler — happens on locals
-        first; only then are self._handler and self._lib published, the
-        candidate references dropped, the cold-start full read re-armed
-        and self._lift_type set last. That final block contains no await,
-        so a raising probe or a cancellation before publication leaves the
-        proxy exactly as it was: UNKNOWN, with both candidates alive
-        (FR-008). The losing handler is closed only after publication, so a
-        cancellation on that thread hop can leak its file descriptor but
-        can never leave a half-bound proxy.
+        pair. The one step that can still fail — the AHL polling-table
+        detection — happens on locals first; only then are self._handler
+        and self._lib published, the candidate references dropped, the
+        cold-start full read re-armed and self._lift_type set last. That
+        final block contains no await, so a raising probe or a
+        cancellation before publication leaves the proxy exactly as it
+        was: UNKNOWN, with both candidates alive (FR-008). The losing
+        handler is closed only after publication, so a cancellation on
+        that thread hop can leak its file descriptor but can never leave
+        a half-bound proxy. A missing handler or lib aborts the bind
+        before publication for the same reason.
 
         Args:
             lift_type: The identified lift type (AHL or ONE_K).
         """
         async with self._handler_lock:
-            handler: ModBusHandler | Rs232Handler | None
-            lib: AhlLib | ThousandLib | None
+            handler: ModBusHandler | Rs232Handler | None = None
+            lib: AhlLib | ThousandLib | None = None
             loser: ModBusHandler | Rs232Handler | None = None
             match lift_type:
                 case LiftType.AHL:
                     handler = self._modbus_handler
                     ahl_lib = AhlLib()
                     lib = ahl_lib
-                    if handler is None:
-                        logger.error("_bind called for AHL without a Modbus handler")
-                    else:
-                        await self._detect_ahl_polling_table(handler, ahl_lib)
                     loser = self._rs232_handler
-                    logger.info("LiftProxy initialized for AHL lift")
+                    if handler is not None:
+                        await self._detect_ahl_polling_table(handler, ahl_lib)
                 case LiftType.ONE_K:
                     handler = self._rs232_handler
                     lib = self._thousand_lib
                     loser = self._modbus_handler
-                    logger.info("LiftProxy initialized for 1k lift")
+            if handler is None or lib is None:
+                # Unreachable while candidates are cleared only by a
+                # successful bind, but bail before publishing rather than
+                # leave _handler None under a real _lift_type (FR-008).
+                logger.error(
+                    "_bind(%s) without a handler + lib pair, staying UNKNOWN",
+                    lift_type.value,
+                )
+                return
+            logger.info("LiftProxy initialized for %s lift", lift_type.value)
             # Publish the bound pair — no await below this line.
             self._handler = handler
             self._lib = lib
@@ -450,10 +457,13 @@ class LiftProxy:
 
         Logging is rate limited: the probe itself runs with quiet=True so
         its per-round failure lines drop to DEBUG, leaving one WARNING on
-        the first miss and a summary every REIDENTIFY_LOG_EVERY attempts
+        the first miss and a summary every REIDENTIFY_LOG_EVERY attempts.
+        A raising probe is rate limited the same way: one traceback on the
+        first error, then a summary every REIDENTIFY_LOG_EVERY errors
         (FR-010).
         """
         attempts = 0
+        errors = 0
         while self._lift_type == LiftType.UNKNOWN:
             await asyncio.sleep(REIDENTIFY_INTERVAL)
             attempts += 1
@@ -464,7 +474,17 @@ class LiftProxy:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.exception("Background lift identification failed")
+                # Same rate limit as the miss path: a probe that raises
+                # every round must not emit a traceback every interval
+                # (FR-010).
+                errors += 1
+                if errors == 1:
+                    logger.exception("Background lift identification failed")
+                elif errors % REIDENTIFY_LOG_EVERY == 0:
+                    logger.warning(
+                        "Background lift identification still failing (%d errors)",
+                        errors,
+                    )
             else:
                 if attempts == 1:
                     logger.warning(
@@ -491,9 +511,7 @@ class LiftProxy:
             self._event_sender.lift_type = self._lift_type
         if self._reporter is not None:
             try:
-                await self._reporter.report_property(
-                    "gw.liftType", self._lift_type.value
-                )
+                await self._report_lift_type(self._reporter)
             except Exception:
                 logger.exception("Failed to report gw.liftType after late identification")
 

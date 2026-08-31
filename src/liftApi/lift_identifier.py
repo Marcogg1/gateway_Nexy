@@ -10,6 +10,7 @@ cycle.
 """
 
 import asyncio
+from collections.abc import Callable
 from enum import Enum, unique
 from typing import TYPE_CHECKING
 
@@ -60,19 +61,9 @@ async def identify_lift(
     Returns:
         The identified LiftType.
     """
-    def log_probe_failure(msg: str, *args: object) -> None:
-        """Log a per-round probe failure, demoted to DEBUG when quiet."""
-        if quiet:
-            logger.debug(msg, *args)
-        else:
-            logger.info(msg, *args)
-
-    def log_round_miss(msg: str, *args: object) -> None:
-        """Log the end-of-round 'nothing responded' line, quiet-aware."""
-        if quiet:
-            logger.debug(msg, *args)
-        else:
-            logger.warning(msg, *args)
+    def log_miss(loud: Callable[..., None], msg: str, *args: object) -> None:
+        """Log a probe miss through `loud`, or at DEBUG when quiet."""
+        (logger.debug if quiet else loud)(msg, *args)
 
     if modbus_handler is not None:
         try:
@@ -82,7 +73,7 @@ async def identify_lift(
             if err == MbCode.NO_ERR.name:
                 logger.info("Lift identified as AHL (Modbus responded)")
                 return LiftType.AHL
-            log_probe_failure("Modbus probe failed with %s, trying RS232", err)
+            log_miss(logger.info, "Modbus probe failed with %s, trying RS232", err)
         except Exception:
             logger.warning("Modbus probe raised exception, trying RS232", exc_info=True)
     else:
@@ -96,11 +87,11 @@ async def identify_lift(
             if err == Rs232Code.NO_ERR.name:
                 logger.info("Lift identified as 1k (RS232 responded)")
                 return LiftType.ONE_K
-            log_probe_failure("RS232 probe failed with %s", err)
+            log_miss(logger.info, "RS232 probe failed with %s", err)
         except Exception as e:
             logger.warning("RS232 probe raised exception: %s", e, exc_info=True)
     else:
         logger.info("No RS232Handler provided, skipping 1k probe")
 
-    log_round_miss("Neither handler responded — lift type is UNKNOWN")
+    log_miss(logger.warning, "Neither handler responded — lift type is UNKNOWN")
     return LiftType.UNKNOWN
