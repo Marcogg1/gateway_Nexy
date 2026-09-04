@@ -146,6 +146,22 @@ class TestIdentifyLiftQuiet(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result, LiftType.AHL)
         self.assertIn("Lift identified as AHL", captured.records[0].getMessage())
 
+    async def test_quiet_demotes_raising_probes_to_debug(self):
+        """A probe that raises every round must not warn every round (FR-010)."""
+        self.modbus.read_parameter.side_effect = RuntimeError("tty")
+        self.rs232.get_ar_version.side_effect = RuntimeError("tty")
+        with self.assertNoLogs(self.LOGGER, level="INFO"):
+            result = await identify_lift(self.modbus, self.rs232, quiet=True)
+        self.assertEqual(result, LiftType.UNKNOWN)
+
+    async def test_loud_round_keeps_traceback_for_raising_probe(self):
+        """Startup keeps the WARNING with traceback when a probe raises."""
+        self.modbus.read_parameter.side_effect = RuntimeError("tty")
+        with self.assertLogs(self.LOGGER, level="WARNING") as captured:
+            await identify_lift(self.modbus, self.rs232)
+        raised = [r for r in captured.records if r.exc_info]
+        self.assertEqual(len(raised), 1)
+
     async def test_quiet_defaults_to_false(self):
         """Callers that pass nothing keep the loud startup logging."""
         with self.assertLogs(self.LOGGER, level="WARNING"):

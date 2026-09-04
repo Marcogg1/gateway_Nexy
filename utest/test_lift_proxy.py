@@ -230,6 +230,24 @@ class TestLiftProxyRetry(LiftProxyTestBase):
         # Sleep is called between retries, not after the last one
         self.assertEqual(self.mock_sleep.call_count, 9)  # 10 attempts, 9 sleeps
 
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_raising_probe_counts_as_failed_attempt(self, mock_identify):
+        """A raising startup probe is retried, not propagated (FR-008)."""
+        mock_identify.side_effect = [RuntimeError("bus"), LiftType.AHL]
+        proxy = await LiftProxy.create()
+        self.assertEqual(proxy.lift_type, LiftType.AHL)
+        self.assertEqual(mock_identify.call_count, 2)
+        self.mock_sleep.assert_called_once_with(5)
+
+    @patch("liftApi.lift_proxy.IDENTIFY_MAX_RETRIES", 3)
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_always_raising_probe_ends_unknown(self, mock_identify):
+        """create() must return an UNKNOWN proxy, never raise, so main() goes on."""
+        mock_identify.side_effect = RuntimeError("bus")
+        proxy = await LiftProxy.create()
+        self.assertEqual(proxy.lift_type, LiftType.UNKNOWN)
+        self.assertEqual(mock_identify.call_count, 3)
+
 
 class TestBind(LiftProxyTestBase):
     """Tests for the bind step that commits one handler + lib pair."""
@@ -415,6 +433,84 @@ class TestBind(LiftProxyTestBase):
 
         self.assertFalse(proxy._handler_lock.locked())
 
+    async def test_bind_without_handler_stays_unknown(self):
+        """A missing candidate handler must not publish a half-bound pair."""
+        proxy = LiftProxy()
+        await proxy._create_handlers()
+        proxy._modbus_handler = None
+
+        await proxy._bind(LiftType.AHL)
+
+        self.assertIsNone(proxy._handler)
+        self.assertIsNone(proxy._lib)
+        self.assertEqual(proxy._lift_type, LiftType.UNKNOWN)
+        self.mock_rs232.close.assert_not_called()
+
+    async def test_bind_without_lib_stays_unknown(self):
+        """The ONE_K arm is guarded the same way."""
+        proxy = LiftProxy()
+        await proxy._create_handlers()
+        proxy._thousand_lib = None
+
+        await proxy._bind(LiftType.ONE_K)
+
+        self.assertIsNone(proxy._handler)
+        self.assertEqual(proxy._lift_type, LiftType.UNKNOWN)
+        self.mock_modbus.close.assert_not_called()
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_try_identify_is_false_when_bind_bails(self, mock_identify):
+        """A bind that bails must not be reported as a success to the loops."""
+        mock_identify.return_value = LiftType.AHL
+        proxy = LiftProxy()
+        await proxy._create_handlers()
+        proxy._modbus_handler = None
+
+        self.assertFalse(await proxy._try_identify())
+        self.assertEqual(proxy._lift_type, LiftType.UNKNOWN)
+
+
+class TestDetectAhlPollingTable(LiftProxyTestBase):
+    """Tests for the param 127 polling-table detection at bind time."""
+
+    async def _detect(self, code):
+        proxy = LiftProxy()
+        await proxy._create_handlers()
+        self.mock_modbus.read_parameter.return_value = (-1, "ModBusHandler", code)
+        lib = MagicMock()
+        await proxy._detect_ahl_polling_table(self.mock_modbus, lib)
+        return lib
+
+    async def test_readable_selects_new_table(self):
+        lib = await self._detect("NO_ERR")
+        lib.set_polling_table.assert_called_once_with(True)
+
+    async def test_lcm_err_selects_old_table(self):
+        """LCM_ERR means the parameter does not exist: old firmware."""
+        lib = await self._detect("LCM_ERR")
+        lib.set_polling_table.assert_called_once_with(False)
+
+    async def test_com_err_raises_instead_of_guessing(self):
+        """A transient read failure must not lock in the old table (FR-008)."""
+        with self.assertRaises(RuntimeError):
+            await self._detect("COM_ERR")
+
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_com_err_leaves_bind_unpublished(self, mock_identify):
+        """The next background round retries from a clean UNKNOWN state."""
+        mock_identify.return_value = LiftType.AHL
+        proxy = LiftProxy()
+        await proxy._create_handlers()
+        self.mock_modbus.read_parameter.return_value = (-1, "ModBusHandler", "COM_ERR")
+
+        with self.assertRaises(RuntimeError):
+            await proxy._try_identify()
+
+        self.assertEqual(proxy._lift_type, LiftType.UNKNOWN)
+        self.assertIsNone(proxy._handler)
+        self.assertIs(proxy._modbus_handler, self.mock_modbus)
+        self.mock_rs232.close.assert_not_called()
+
 
 class TestReportLiftType(LiftProxyTestBase):
     """Tests for the bounded startup twin report (AIOT-183 US2)."""
@@ -551,6 +647,27 @@ class TestReidentifyLoop(LiftProxyTestBase):
             len(self._summary_calls(mock_logger)),
             unknown_rounds // REIDENTIFY_LOG_EVERY,
         )
+
+    @patch("liftApi.lift_proxy.logger")
+    @patch("liftApi.lift_proxy.asyncio.sleep", new_callable=AsyncMock)
+    @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
+    async def test_error_log_rate_limited(self, mock_identify, _mock_sleep, mock_logger):
+        """One traceback on the first error, then a WARNING summary every N."""
+        error_rounds = 25
+        mock_identify.side_effect = (
+            [RuntimeError("bus")] * error_rounds + [LiftType.AHL]
+        )
+        proxy = await self._unknown_proxy()
+
+        await proxy._reidentify_loop()
+
+        self.assertEqual(mock_logger.exception.call_count, 1)
+        summaries = [
+            c for c in mock_logger.warning.call_args_list
+            if "still failing" in c.args[0]
+        ]
+        self.assertEqual(len(summaries), error_rounds // REIDENTIFY_LOG_EVERY)
+        self.assertEqual(proxy.lift_type, LiftType.AHL)
 
     @patch("liftApi.lift_proxy.identify_lift", new_callable=AsyncMock)
     async def test_run_gathers_reidentify_loop(self, mock_identify):

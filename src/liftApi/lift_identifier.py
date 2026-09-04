@@ -52,18 +52,21 @@ async def identify_lift(
     Args:
         modbus_handler: ModBusHandler instance (or None to skip).
         rs232_handler: Rs232Handler instance (or None to skip).
-        quiet: When True, the per-round probe-failure lines are logged at
-            DEBUG instead of INFO/WARNING. Used by the background
-            re-identification loop (AIOT-183 FR-010), which would
-            otherwise flood the log with one burst per probe interval.
-            Success lines stay at INFO regardless.
+        quiet: When True, the per-round probe-failure lines (including a
+            raising handler's traceback) are logged at DEBUG instead of
+            INFO/WARNING. Used by the background re-identification loop
+            (AIOT-183 FR-010), which would otherwise flood the log with
+            one burst per probe interval. Success lines stay at INFO
+            regardless.
 
     Returns:
         The identified LiftType.
     """
-    def log_miss(loud: Callable[..., None], msg: str, *args: object) -> None:
+    def log_miss(
+        loud: Callable[..., None], msg: str, *args: object, exc_info: bool = False
+    ) -> None:
         """Log a probe miss through `loud`, or at DEBUG when quiet."""
-        (logger.debug if quiet else loud)(msg, *args)
+        (logger.debug if quiet else loud)(msg, *args, exc_info=exc_info)
 
     if modbus_handler is not None:
         try:
@@ -75,7 +78,11 @@ async def identify_lift(
                 return LiftType.AHL
             log_miss(logger.info, "Modbus probe failed with %s, trying RS232", err)
         except Exception:
-            logger.warning("Modbus probe raised exception, trying RS232", exc_info=True)
+            log_miss(
+                logger.warning,
+                "Modbus probe raised exception, trying RS232",
+                exc_info=True,
+            )
     else:
         logger.info("No ModbusHandler provided, skipping AHL probe")
 
@@ -89,7 +96,7 @@ async def identify_lift(
                 return LiftType.ONE_K
             log_miss(logger.info, "RS232 probe failed with %s", err)
         except Exception as e:
-            logger.warning("RS232 probe raised exception: %s", e, exc_info=True)
+            log_miss(logger.warning, "RS232 probe raised exception: %s", e, exc_info=True)
     else:
         logger.info("No RS232Handler provided, skipping 1k probe")
 

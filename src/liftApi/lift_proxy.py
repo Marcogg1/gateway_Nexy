@@ -12,7 +12,7 @@ from cloudApi.device_twin_desired_handler import DeviceTwinDesiredHandler
 from cloudApi.device_twin_reported import DeviceTwinReporter
 from cloudApi.event_sender import EventSender
 from lib.ahl_lib import AhlLib
-from lib.error_signals import LpCode, Rs232Code
+from lib.error_signals import LpCode, MbCode, Rs232Code
 from lib.logging_config import get_logger
 from lib.thousand_lib import ThousandLib
 from liftApi.idle_supervisor import IdleSupervisor, ParamChange
@@ -76,8 +76,20 @@ class LiftProxy:
         proxy = cls(idle_supervisor=idle_supervisor)
         await proxy._create_handlers()
         for attempt in range(IDENTIFY_MAX_RETRIES):
-            if await proxy._try_identify():
-                return proxy
+            try:
+                if await proxy._try_identify():
+                    return proxy
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                # A raising probe (e.g. a transient read failure while the
+                # lift is booting) is a failed attempt, not a startup
+                # failure: the proxy stays UNKNOWN and the next attempt or
+                # the background loop retries (FR-008).
+                logger.exception(
+                    "Identification attempt %d/%d raised",
+                    attempt + 1, IDENTIFY_MAX_RETRIES,
+                )
             if attempt < IDENTIFY_MAX_RETRIES - 1:
                 logger.warning(
                     "Identification attempt %d/%d failed, retrying in %ds",
@@ -129,7 +141,7 @@ class LiftProxy:
 
         Returns:
             True if the lift was identified and the handler + lib pair is
-            bound, False if the probe returned UNKNOWN.
+            bound, False if the probe returned UNKNOWN or the bind bailed.
         """
         lift_type = await identify_lift(
             self._modbus_handler, self._rs232_handler, quiet=quiet
@@ -137,7 +149,7 @@ class LiftProxy:
         if lift_type == LiftType.UNKNOWN:
             return False
         await self._bind(lift_type)
-        return True
+        return self._lift_type is not LiftType.UNKNOWN
 
     async def _bind(self, lift_type: LiftType) -> None:
         """Commit one handler + lib pair for the identified lift type.
@@ -442,7 +454,7 @@ class LiftProxy:
             )
         except asyncio.TimeoutError:
             logger.warning(
-                "Timed out reporting gw.liftType after %ds - continuing startup",
+                "Timed out reporting gw.liftType after %ds",
                 REPORT_TIMEOUT,
             )
 
@@ -458,9 +470,11 @@ class LiftProxy:
         Logging is rate limited: the probe itself runs with quiet=True so
         its per-round failure lines drop to DEBUG, leaving one WARNING on
         the first miss and a summary every REIDENTIFY_LOG_EVERY attempts.
-        A raising probe is rate limited the same way: one traceback on the
+        A raising round is rate limited the same way: one traceback on the
         first error, then a summary every REIDENTIFY_LOG_EVERY errors
-        (FR-010).
+        (FR-010). identify_lift() swallows the handlers' own exceptions
+        (at DEBUG when quiet), so this path covers _bind(): in practice
+        the AHL polling-table detection.
         """
         attempts = 0
         errors = 0
@@ -658,7 +672,12 @@ class LiftProxy:
         """Detect which AHL polling table to use by reading param 127.
 
         If param 127 is readable, the lift uses new firmware with the
-        new polling table. Otherwise, fall back to the old table.
+        new polling table. LCM_ERR means the parameter does not exist:
+        old firmware, old table. Any other code (COM_ERR after the
+        handler's retries, LINK_ERR) says nothing about the firmware, so
+        it raises and _bind() aborts before publication; the next
+        identification round retries. Guessing here would lock the wrong
+        polling table in for the whole power cycle (FR-008).
 
         Takes the handler explicitly because it runs before _bind()
         publishes self._handler (FR-008).
@@ -666,11 +685,22 @@ class LiftProxy:
         Args:
             handler: The Modbus handler to probe param 127 with.
             lib: The AhlLib instance whose polling table should be configured.
+
+        Raises:
+            RuntimeError: If the read failed for any reason other than the
+                parameter not existing.
         """
-        value, _, code = await asyncio.to_thread(
+        _, _, code = await asyncio.to_thread(
             handler.read_parameter, ["127"]
         )
-        new_table = code == "NO_ERR"
+        if code == MbCode.NO_ERR.name:
+            new_table = True
+        elif code == MbCode.LCM_ERR.name:
+            new_table = False
+        else:
+            raise RuntimeError(
+                f"AHL polling-table detection failed: param 127 read returned {code}"
+            )
         lib.set_polling_table(new_table)
         logger.info(
             "AHL polling table: %s (param 127 %s)",
